@@ -25,6 +25,7 @@ of allow / deny / ask.
 
 import json
 import os
+import re
 import socket
 import sys
 import time
@@ -108,6 +109,61 @@ PUSHCUT_URL = "https://api.pushcut.io/v1/notifications/" + urllib.parse.quote(
 # (~45s) so a normal wait isn't mistaken for a dead connection. It's only a
 # dead-connection fallback, not the total wait.
 STREAM_READ_TIMEOUT = 60
+
+
+# ---------- Danger filter: only escalate risky commands to the watch ----------
+# When WATCH_DANGER_ONLY=1, anything that does NOT match a danger pattern returns
+# "ask" immediately (defers to the agent's normal flow) WITHOUT buzzing your watch.
+# This keeps routine commands quiet and only pings you for genuinely risky actions.
+DANGER_ONLY = os.environ.get("WATCH_DANGER_ONLY", "0").strip() == "1"
+
+_DEFAULT_DANGER_PATTERNS = [
+    r"\brm\s+-",                                       # rm with any flag (rm -rf, rm -r ...)
+    r"\bsudo\b",
+    r"\bgit\s+push\b.*(--force|-f|\s\+)",              # force push
+    r"\bgit\s+reset\s+--hard\b",
+    r"\bgit\s+clean\s+-[a-z]*f",
+    r"\bdd\b.*\bif=",
+    r"\bmkfs\b",
+    r"\bof=/dev/",
+    r">\s*/dev/sd",
+    r"\b(shutdown|reboot|halt|poweroff)\b",
+    r"\b(kill|pkill|killall)\b",
+    r"\bchmod\s+(-r\s+|.*\b777\b)",
+    r"\bchown\s+-r\b",
+    r":\(\)\s*\{",                                     # fork bomb
+    r"\b(drop|truncate)\s+(table|database)\b",
+    r"\bdelete\s+from\b",
+    r"(curl|wget)\b.*\|\s*(sudo\s+)?(sh|bash|zsh)\b",  # curl ... | sh
+    r"\bnpm\s+publish\b",
+    r"\bdocker\b.*\b(rm|prune|down)\b",
+    r"\bterraform\s+destroy\b",
+    r"\bkubectl\s+delete\b",
+    r"\bremove-item\b.*-recurse.*-force",             # PowerShell
+    r"\bdel\b\s+/[sf]",                                # cmd del /s /f
+    r"\bformat\b\s+[a-z]:",                            # format C:
+]
+# WATCH_DANGER_REGEX fully replaces the defaults; WATCH_DANGER_EXTRA (newline-separated)
+# adds to them.
+_danger_override = os.environ.get("WATCH_DANGER_REGEX", "").strip()
+_danger_extra = [p for p in os.environ.get("WATCH_DANGER_EXTRA", "").split("\n") if p.strip()]
+_danger_sources = [_danger_override] if _danger_override else (_DEFAULT_DANGER_PATTERNS + _danger_extra)
+_DANGER_RE = []
+for _p in _danger_sources:
+    try:
+        _DANGER_RE.append(re.compile(_p, re.IGNORECASE))
+    except re.error:
+        pass
+
+
+def is_dangerous(text):
+    """Return True if `text` matches any danger pattern."""
+    if not text:
+        return False
+    for rx in _DANGER_RE:
+        if rx.search(text):
+            return True
+    return False
 
 
 def emit(decision, reason):
@@ -289,6 +345,15 @@ def main():
         emit("ask", "watch-approve: PUSHCUT_KEY or NTFY_TOPIC missing; falling back to normal approval.")
 
     desc = describe(tool_name, tool_input)
+
+    # In danger-only mode, let non-risky operations pass straight through (no watch).
+    if DANGER_ONLY:
+        match_text = ""
+        if isinstance(tool_input, dict):
+            match_text = str(tool_input.get("command") or tool_input.get("file_path") or "")
+        if not is_dangerous(match_text or desc):
+            emit("ask", "watch-approve: not flagged as risky; deferring to normal approval.")
+
     opener = make_opener()
 
     # 3) Race-safe: record t0, then send the notification, then subscribe with since=t0.

@@ -97,6 +97,25 @@ echo '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command"
 | `PUSHCUT_RETRIES` | `12` | 触发 Pushcut 的重试次数(应对到 api.pushcut.io 的 TLS 偶发失败)。 |
 | `PUSHCUT_TIMEOUT` | `6` | 单次触发 Pushcut 的超时(秒)。 |
 | `NTFY_BASE` | `https://ntfy.sh/` | ntfy 服务器地址(自建时改)。 |
+| `WATCH_DANGER_ONLY` | `0` | `1`=只有「危险」命令才弹手表,其余直接返回 `ask`(见下)。 |
+| `WATCH_DANGER_EXTRA` | — | 追加的危险正则(换行分隔,忽略大小写)。 |
+| `WATCH_DANGER_REGEX` | — | 单条正则,**整体替换**内置危险清单。 |
+
+---
+
+## 降噪(danger-only 模式)
+
+默认情况下,`matcher` 命中的**每一个**工具调用都会让你审批——可能很烦。把 `WATCH_DANGER_ONLY=1`
+打开,hook 就只在**危险**命令时弹手表,其余直接返回 `ask`(agent 照常工作,手表保持安静)。
+
+推荐的低打扰配置:`WATCH_DANGER_ONLY=1` + 把 `matcher` 收窄成 `"Bash"`。
+
+内置危险清单会命中:`rm -rf`、`sudo`、`git push --force`、`git reset --hard`、`dd`、`mkfs`、
+`chmod 777`、`shutdown`/`reboot`、`kill`、`drop/truncate table`、`delete from`、`curl ... | sh`、
+`docker prune`、`terraform destroy`、`kubectl delete`、PowerShell 的 `Remove-Item -Recurse -Force` 等。
+可用 `WATCH_DANGER_EXTRA` 追加,或用 `WATCH_DANGER_REGEX` 整体替换。
+
+> 开了 danger-only 后,要用危险命令测试(如 `rm -rf /tmp/x`)——普通的 `echo hello` 按设计**不会**弹通知。
 
 ---
 

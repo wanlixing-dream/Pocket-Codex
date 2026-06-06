@@ -7,7 +7,8 @@
     "WATCH_AGENT_LABEL": "Claude",
     "APPROVE_WAIT": "240",
     "APPROVE_TIMEOUT_DECISION": "ask",
-    "HTTPS_PROXY": ""
+    "HTTPS_PROXY": "",
+    "WATCH_DANGER_ONLY": "0"
   },
   "hooks": {
     "PreToolUse": [

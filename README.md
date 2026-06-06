@@ -111,6 +111,27 @@ Lock your iPhone so the notification reaches the watch, tap **Allow**, and you s
 | `PUSHCUT_RETRIES` | `12` | Retry count for triggering Pushcut (handles flaky TLS to api.pushcut.io). |
 | `PUSHCUT_TIMEOUT` | `6` | Per-attempt timeout (s) for triggering Pushcut. |
 | `NTFY_BASE` | `https://ntfy.sh/` | ntfy server base URL (change if you self-host). |
+| `WATCH_DANGER_ONLY` | `0` | `1` = only "risky" commands ping the watch; everything else returns `ask` instantly (see below). |
+| `WATCH_DANGER_EXTRA` | — | Extra danger regexes to add (newline-separated), case-insensitive. |
+| `WATCH_DANGER_REGEX` | — | A single regex that **replaces** the built-in danger list entirely. |
+
+---
+
+## Reducing noise (danger-only mode)
+
+By default the hook asks for approval on **every** tool call matched by `matcher` — that can be a lot.
+Set `WATCH_DANGER_ONLY=1` and the hook only pings your watch for **risky** commands (the rest return
+`ask` immediately, so the agent behaves normally and your watch stays quiet).
+
+Recommended low-noise setup: `WATCH_DANGER_ONLY=1` plus a narrow `"matcher": "Bash"`.
+
+The built-in danger list flags things like `rm -rf`, `sudo`, `git push --force`, `git reset --hard`,
+`dd`, `mkfs`, `chmod 777`, `shutdown`/`reboot`, `kill`, `drop/truncate table`, `delete from`,
+`curl ... | sh`, `docker prune`, `terraform destroy`, `kubectl delete`, PowerShell `Remove-Item -Recurse
+-Force`, etc. Extend it with `WATCH_DANGER_EXTRA`, or replace it wholesale with `WATCH_DANGER_REGEX`.
+
+> If you enable danger-only, test with a risky command (e.g. `rm -rf /tmp/x`) — a plain `echo hello`
+> won't trigger a notification by design.
 
 ---
 
