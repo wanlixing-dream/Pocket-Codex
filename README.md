@@ -32,7 +32,8 @@
 
 1. **⌚ 远程审批** —— 危险操作(`rm -rf`、`git push --force`、提权、出沙箱……)推送到手表,带 **✅ 允许 / ❌ 拒绝** 按钮,点一下,结果秒回 agent;
 2. **🔔 完成提醒** —— agent 每跑完一轮任务,手表震一下「任务已完成」,你随时回来验收;
-3. **🤖 其余全自动** —— 不危险的操作静默放行(可配),终端再也不弹「yes/no」。
+3. **🚦 限额提醒** —— 订阅额度用完(Claude)或快烧完(Codex,默认 ≥90% 预警)时第一时间通知你,附重置时间;任务被 API 错误中断也会提醒;
+4. **🤖 其余全自动** —— 不危险的操作静默放行(可配),终端再也不弹「yes/no」。
 
 两个 Python 脚本,**只用标准库、零依赖**,并且**全程 fail-safe**:配置缺失 / 网络挂了 / 超时,一律退回 agent 自己的终端审批,绝不卡死你的任务。
 
@@ -149,6 +150,22 @@ WATCH_NONDANGER_DECISION=allow # 其余静默放行(不弹手表、不弹终端)
 **防 agent「自改 hook」**:设 `WATCH_PROTECT_PATHS=watch-hooks` 后,任何对脚本目录的**写操作**
 也强制上手表(🛡️ 改 hook 脚本),agent 想偷偷解除你的管控?先过你手腕这关。
 
+## 限额提醒(订阅党刚需)
+
+Claude Code 和 Codex 的订阅都有用量窗口,烧完直接给你停活——人在摸鱼,任务在后台默默死掉是最惨的。
+这件事也搬上手表了,两边机制不同(都实测过):
+
+- **Claude**:挂在官方 **`StopFailure`** hook 上(回合因 API 错误终止时代替 Stop 触发)。
+  限额错误(`error=rate_limit`)→「**🚦 Claude 额度已用完**」+ 重置时间(从错误文案里抽出
+  `resets 1:10am (Asia/Shanghai)` 这类信息);其它 API 错误 →「**⚠️ 任务异常终止**」+ 错误类型。
+- **Codex**:限额报错的回合**不跑任何 hook**(读源码确认:错误路径直接 break),没法在死亡瞬间通知,
+  所以改为**预警**:每次任务完成时顺带读 Codex 自己的额度遥测(rollout 里的 `rate_limits`,含
+  `used_percent` 和重置时间),用量 ≥ `WATCH_LIMIT_WARN_PCT`(默认 **90%**)时,完成通知自动变成
+  「**⚠️ Codex 额度已用 NN%**」+ 重置时间——在烧干**之前**就提醒你省着点用。
+- 这类通知用单独的警示音(`WATCH_LIMIT_SOUND`,默认 `problem`),和普通完成提醒一耳朵区分。
+
+接线:Claude 在 settings.json 的 hooks 里加一段 `StopFailure`(示例已含);Codex 无需额外接线(复用已有的 Stop)。
+
 ## 双 agent 视觉区分
 
 同一份脚本服务两个 agent,通知一眼可辨(`--agent codex` 或 `WATCH_AGENT=codex` 切换):
@@ -201,6 +218,8 @@ WATCH_NONDANGER_DECISION=allow # 其余静默放行(不弹手表、不弹终端)
 | `PUSHCUT_IMAGE` | 按 agent 取预设 | 通知配图 URL;`none`=不带 |
 | `WATCH_DONE_TITLE` / `WATCH_DONE_TEXT` | 按 agent 取预设 | 完成提醒的标题/正文 |
 | `WATCH_DONE_SOUND` | `jobDone` | 完成提醒声音 |
+| `WATCH_LIMIT_WARN_PCT` | `90` | (Codex)额度预警阈值 %,任务完成时用量超过即预警;`0`=关闭 |
+| `WATCH_LIMIT_SOUND` | `problem` | 限额/异常类通知的声音 |
 
 **网络与调试**
 

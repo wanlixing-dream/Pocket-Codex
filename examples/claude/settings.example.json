@@ -36,6 +36,17 @@
           }
         ]
       }
+    ],
+    "StopFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"/ABSOLUTE/PATH/TO/watch_done.py\"",
+            "timeout": 60
+          }
+        ]
+      }
     ]
   }
 }

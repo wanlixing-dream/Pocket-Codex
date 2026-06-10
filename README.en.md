@@ -27,7 +27,8 @@ with ✅ Allow / ❌ Deny buttons, and pings you when each task finishes — no 
 
 1. **⌚ Remote approval** — risky actions (`rm -rf`, `git push --force`, privilege escalation, sandbox escapes…) push a notification with **Allow / Deny** buttons to your watch; your tap flows back to the agent in seconds.
 2. **🔔 Done notifications** — every time the agent finishes a turn, your wrist buzzes "task complete".
-3. **🤖 Autopilot for the rest** — non-risky operations are silently auto-approved (configurable), so the terminal never prompts again.
+3. **🚦 Usage-limit alerts** — get notified the moment your subscription quota runs out (Claude) or is about to (Codex, ≥90% warning by default), with the reset time; turns killed by API errors alert you too.
+4. **🤖 Autopilot for the rest** — non-risky operations are silently auto-approved (configurable), so the terminal never prompts again.
 
 Two Python scripts, **standard library only, zero dependencies**, and **fail-safe end to end**: missing config, network failure, or timeout all fall back to the agent's normal in-terminal prompt — your run never hangs.
 
@@ -151,6 +152,26 @@ basename, e.g. `🗑️ delete folder: node_modules`, `⚠️ git force push: ma
 **Anti-tamper:** set `WATCH_PROTECT_PATHS=watch-hooks` and any *write* to the scripts' folder is itself
 forced onto the watch (🛡️) — the agent can't quietly edit your gate away.
 
+## Usage-limit alerts (a must for subscription plans)
+
+Both Claude Code and Codex subscriptions have usage windows — when they run dry your task silently
+dies while you're away. That's now on your wrist too, via two different mechanisms (both verified):
+
+- **Claude**: hangs off the official **`StopFailure`** hook (runs *instead of* Stop when a turn ends
+  on an API error). Limit errors (`error=rate_limit`) → "**🚦 Claude quota exhausted**" with the reset
+  time extracted from the error text (e.g. `resets 1:10am`); other API errors → "**⚠️ turn failed**"
+  with the error type.
+- **Codex**: a turn that dies on a usage-limit error runs **no hooks at all** (confirmed in source —
+  the error path breaks before stop hooks), so instead you get an **early warning**: at every normal
+  turn end the script reads Codex's own quota telemetry (`rate_limits` in the rollout, with
+  `used_percent` and reset time). At ≥ `WATCH_LIMIT_WARN_PCT` (default **90%**) the done notification
+  becomes "**⚠️ Codex quota at NN%**" + reset time — you're warned *before* it burns out.
+- These alerts use a distinct sound (`WATCH_LIMIT_SOUND`, default `problem`) so your ear can tell
+  them from normal done pings.
+
+Wiring: for Claude add a `StopFailure` block to your settings hooks (the example includes it);
+Codex needs nothing extra (it rides the existing Stop hook).
+
 ## Per-agent look
 
 One script serves both agents (switch via `--agent codex` or `WATCH_AGENT=codex`):
@@ -203,6 +224,8 @@ Override with `PUSHCUT_IMAGE=<url>` (applies to both agents), or `none` to drop 
 | `PUSHCUT_IMAGE` | per-agent preset | Notification image URL; `none` to disable |
 | `WATCH_DONE_TITLE` / `WATCH_DONE_TEXT` | per-agent preset | Done-notification title/body |
 | `WATCH_DONE_SOUND` | `jobDone` | Done-notification sound |
+| `WATCH_LIMIT_WARN_PCT` | `90` | (Codex) quota warning threshold in %, checked at each turn end; `0` = off |
+| `WATCH_LIMIT_SOUND` | `problem` | Sound for limit/failure alerts |
 
 **Network & debugging**
 
