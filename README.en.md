@@ -15,11 +15,44 @@ with ✅ Allow / ❌ Deny buttons, and pings you when each task finishes — no 
 
 **[中文文档](./README.md)**
 
+<img src="./assets/showcase/hero.png" alt="AI agent approvals on your wrist" width="100%">
+
 | Claude Code notifications | Codex notifications |
 |:---:|:---:|
 | <img src="./assets/clawd-crab.gif" width="320" alt="Claude crab"> | <img src="./assets/gpt-cat.png" width="320" alt="GPT knot cat"> |
 
 </div>
+
+## 📺 See it in action
+
+<div align="center">
+  <img src="./assets/showcase/approve-loop.gif" width="380" alt="risky action -> watch buzz -> one tap to approve">
+  <br>
+  <sub>Risky action → watch buzzes → ✅ one tap, the agent keeps going</sub>
+</div>
+
+▶️ **[Full intro video (30s)](./assets/showcase/intro.mp4)** — plays right on GitHub
+
+### Feature gallery
+
+| | | |
+|:---:|:---:|:---:|
+| [<img src="./assets/showcase/card-claude-approve.jpg" width="260">](./assets/showcase/card-claude-approve.jpg) | [<img src="./assets/showcase/card-codex-approve.jpg" width="260">](./assets/showcase/card-codex-approve.jpg) | [<img src="./assets/showcase/card-hook-protect.jpg" width="260">](./assets/showcase/card-hook-protect.jpg) |
+| Risky commands ask you first | Codex CLI works the same | Even editing the hook needs approval |
+| [<img src="./assets/showcase/card-task-done.jpg" width="260">](./assets/showcase/card-task-done.jpg) | [<img src="./assets/showcase/card-rate-limit.jpg" width="260">](./assets/showcase/card-rate-limit.jpg) | [<img src="./assets/showcase/card-terminal-forced.jpg" width="260">](./assets/showcase/card-terminal-forced.jpg) |
+| Done? Your wrist knows | Quota alerts, instantly | A heads-up even when the terminal must confirm |
+
+### 📸 Real-device photos
+
+<!-- Drop photos into assets/photos/ and uncomment:
+<div align="center">
+  <img src="./assets/photos/photo-1.jpg" width="260">
+  <img src="./assets/photos/photo-2.jpg" width="260">
+  <img src="./assets/photos/photo-3.jpg" width="260">
+</div>
+-->
+
+> 🚧 Real-device shots coming soon — enjoy the renders above meanwhile.
 
 ---
 

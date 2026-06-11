@@ -15,6 +15,8 @@
 
 **[English](./README.en.md)**
 
+<img src="./assets/showcase/hero.png" alt="把 AI Agent 的审批戴在手腕上" width="100%">
+
 | Claude Code 的通知 | Codex 的通知 |
 |:---:|:---:|
 | <img src="./assets/clawd-crab.gif" width="320" alt="Claude crab"> | <img src="./assets/gpt-cat.png" width="320" alt="GPT knot cat"> |
@@ -22,7 +24,38 @@
 
 </div>
 
-<!-- 📺 演示视频:在这里贴你的抖音/B站链接 -->
+## 📺 看它干活
+
+<div align="center">
+  <img src="./assets/showcase/approve-loop.gif" width="380" alt="危险操作 → 手表一震 → 点一下放行">
+  <br>
+  <sub>危险操作 → 手表一震 → ✅ 点一下放行,agent 继续干活</sub>
+</div>
+
+▶️ **[完整介绍视频(30 秒)](./assets/showcase/intro.mp4)** —— 点开即播
+
+<!-- 📺 抖音/B站视频发布后,把链接贴在这里 -->
+
+### 功能速览
+
+| | | |
+|:---:|:---:|:---:|
+| [<img src="./assets/showcase/card-claude-approve.jpg" width="260">](./assets/showcase/card-claude-approve.jpg) | [<img src="./assets/showcase/card-codex-approve.jpg" width="260">](./assets/showcase/card-codex-approve.jpg) | [<img src="./assets/showcase/card-hook-protect.jpg" width="260">](./assets/showcase/card-hook-protect.jpg) |
+| 危险命令,先问过你 | Codex CLI 同样支持 | 连改它自己都要批准 |
+| [<img src="./assets/showcase/card-task-done.jpg" width="260">](./assets/showcase/card-task-done.jpg) | [<img src="./assets/showcase/card-rate-limit.jpg" width="260">](./assets/showcase/card-rate-limit.jpg) | [<img src="./assets/showcase/card-terminal-forced.jpg" width="260">](./assets/showcase/card-terminal-forced.jpg) |
+| 跑完了,抬腕就知道 | 额度烧完,立刻知道 | 拦不住的,也提醒你 |
+
+### 📸 真机实拍
+
+<!-- 把真机照片放进 assets/photos/ 后,取消下面的注释即可:
+<div align="center">
+  <img src="./assets/photos/photo-1.jpg" width="260">
+  <img src="./assets/photos/photo-2.jpg" width="260">
+  <img src="./assets/photos/photo-3.jpg" width="260">
+</div>
+-->
+
+> 🚧 真机实拍图稍后补上,先看上面的效果图。
 
 ---
 
