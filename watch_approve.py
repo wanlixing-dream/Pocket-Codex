@@ -17,6 +17,8 @@ Claude Code / Codex CLI PreToolUse hook: 手表远程批准 (watch remote approv
   * 配置全部从环境变量读,绝不硬编码密钥。
   * 任何配置缺失 / 异常 / 超时,一律 fail-safe 成 "ask"(退回终端正常弹窗),
     绝不让 hook 崩溃卡住 Claude Code。
+  * 多窗口并行:每次审批用独立的回执 topic(基础 topic + 随机后缀),几个窗口
+    同时等批准也不会串台;正文末尾带「📁 项目名」,一眼分清是谁在求批准。
 """
 
 import json
@@ -63,6 +65,19 @@ _load_env_file()
 PUSHCUT_KEY = os.environ.get("PUSHCUT_KEY", "").strip()
 PUSHCUT_NOTIF = os.environ.get("PUSHCUT_NOTIF", "claude").strip() or "claude"
 NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "").strip()
+
+# 多窗口并行:ntfy 是发布/订阅,所有订阅同一 topic 的等待方会同时收到同一条回执——
+# 若几个窗口共用一个 topic 一起等审批,你在 A 窗口通知上点的 ✅ 会把 B 窗口的操作一并
+# 放行;过期通知上的迟到点击还会误批后来的请求。所以默认给每次审批生成独立回执 topic
+# (基础 topic + "-" + 12 位随机后缀),按钮只对自己那次请求生效。设 WATCH_UNIQUE_TOPIC=0
+# 退回旧的共享 topic 行为。注意:仅对动态按钮(PUSHCUT_DYNAMIC_ACTIONS=1,默认)生效;
+# app 里手配的静态按钮指向固定 topic,只能共享(多窗口会串台,别用静态按钮跑多窗口)。
+UNIQUE_TOPIC = os.environ.get("WATCH_UNIQUE_TOPIC", "1").strip() != "0"
+
+# 通知正文末尾是否带「📁 项目文件夹名」(hook 输入 cwd 的 basename;Codex 不传 cwd 时
+# 用 hook 进程自己的工作目录兜底)。多窗口并行时靠它分清是哪个窗口/项目在求批准;
+# 单窗口嫌多一行可设 WATCH_SHOW_CWD=0 关掉。
+SHOW_CWD = os.environ.get("WATCH_SHOW_CWD", "1").strip() != "0"
 
 # 代理:优先 HTTPS_PROXY,其次大小写/HTTP 变体,形如 http://127.0.0.1:7890
 PROXY = (
@@ -380,6 +395,22 @@ def short_target(command):
     return base or raw
 
 
+def cwd_label(data):
+    """hook 输入里的 cwd -> 项目文件夹名。多窗口并行时贴在正文末尾,
+    分清「是哪个窗口/项目在求批准」。Codex 的 hook 输入不带 cwd,
+    退而取 hook 进程自己的工作目录(宿主 agent 启动 hook 时一般就是项目目录)。"""
+    cwd = ""
+    if isinstance(data, dict):
+        cwd = str(data.get("cwd") or "").strip()
+    if not cwd:
+        try:
+            cwd = os.getcwd()
+        except Exception:
+            return ""
+    base = os.path.basename(cwd.rstrip("/\\"))
+    return base or cwd
+
+
 def emit(decision, reason):
     """向 stdout 输出 hook JSON 并 exit 0。decision ∈ allow | deny | ask。
 
@@ -495,34 +526,47 @@ def describe(tool_name, tool_input):
     return desc
 
 
-def build_actions():
-    """动态生成 Allow/Deny 两个按钮:用「后台 web 请求」GET 方式 publish 到 ntfy。
+def make_reply_topic():
+    """生成本次审批的回执 topic:多窗口下每次请求独立,互不串台。
+
+    动态按钮 + 未关闭 WATCH_UNIQUE_TOPIC 时 = 基础 topic + "-" + 12 位随机十六进制;
+    否则(静态按钮指向固定 topic / 显式要求共享)退回基础 topic,行为与旧版完全一致。
+    """
+    if UNIQUE_TOPIC and DYNAMIC_ACTIONS:
+        return NTFY_TOPIC + "-" + os.urandom(6).hex()
+    return NTFY_TOPIC
+
+
+def build_actions(reply_topic):
+    """动态生成 Allow/Deny 两个按钮:用「后台 web 请求」GET 方式 publish 到 ntfy
+    的 reply_topic(本次审批专属 topic,见 make_reply_topic)。
 
     关键:必须用 urlBackgroundOptions(后台 web 请求),不能用普通 url(=打开链接/打开
     app)——watchOS 不支持「打开 app / 跑快捷指令」类动作,只支持后台 web 请求。
     用 GET(ntfy 支持 /publish?message=xxx)可避开 urlBackgroundOptions 里 httpBody
     偶发不生效的问题。返回 None 表示不注入(改用 app 里手配的 action)。
     """
-    if not DYNAMIC_ACTIONS or not NTFY_TOPIC:
+    if not DYNAMIC_ACTIONS or not reply_topic:
         return None
-    base = NTFY_BASE + urllib.parse.quote(NTFY_TOPIC, safe="") + "/publish?message="
+    base = NTFY_BASE + urllib.parse.quote(reply_topic, safe="") + "/publish?message="
     return [
         {"name": "✅ 允许", "url": base + "allow", "urlBackgroundOptions": {"httpMethod": "GET"}},
         {"name": "❌ 拒绝", "url": base + "deny", "urlBackgroundOptions": {"httpMethod": "GET"}},
     ]
 
 
-def send_pushcut(opener, title, text, with_actions=True, retries=None):
+def send_pushcut(opener, title, text, with_actions=True, retries=None, reply_topic=None):
     """经代理 POST 触发 Pushcut 通知;对瞬时网络/TLS 失败自动重试。
 
     with_actions=False:不带 Allow/Deny 按钮,纯提醒(用于「去终端确认」这种无需回执的通知)。
+    reply_topic:按钮 publish 的回执 topic(多窗口下本次审批专属;缺省用基础 topic)。
     retries:本次最多尝试几次(默认用 PUSHCUT_RETRIES);提醒类通知传小一点,避免拖慢终端。
     4xx(如通知不存在=404、key 无效=401)是配置问题,重试也没用,直接抛出 ->
     上层会 fail-safe 成 ask。
     """
     payload = {"title": title, "text": text}
     if with_actions:
-        actions = build_actions()
+        actions = build_actions(reply_topic or NTFY_TOPIC)
         if actions:
             payload["actions"] = actions
     if PUSHCUT_DEVICES:
@@ -561,13 +605,14 @@ def send_pushcut(opener, title, text, with_actions=True, retries=None):
         raise last
 
 
-def wait_for_decision(opener, since_ts, deadline):
+def wait_for_decision(opener, since_ts, deadline, topic=None):
     """从 ntfy stream 读 allow/deny。读到返回 'allow'/'deny';到 deadline 返回 None。
 
+    topic:本次审批的回执 topic(缺省用基础 topic,兼容旧行为)。
     用 since=since_ts(发通知前记下的 t0)防竞态:即使秒点、回执比订阅先到,
     重连/订阅时 ntfy 会把 t0 之后的消息一并回放,不会漏。
     """
-    url = NTFY_BASE + NTFY_TOPIC + "/json?since=" + str(since_ts)
+    url = NTFY_BASE + (topic or NTFY_TOPIC) + "/json?since=" + str(since_ts)
     while time.monotonic() < deadline:
         try:
             resp = opener.open(url, timeout=STREAM_READ_TIMEOUT)
@@ -650,6 +695,12 @@ def main():
         if _d:
             desc = _d if len(_d) <= DESC_MAX else _d[: DESC_MAX - 1] + "…"
 
+    # 多窗口并行:正文末尾带「📁 项目文件夹名」,手表上一眼分清是哪个窗口在说话。
+    if SHOW_CWD:
+        _folder = cwd_label(data)
+        if _folder:
+            desc = (desc + "\n📁 " + _folder) if desc else "📁 " + _folder
+
     # 0) 会被 Claude Code 强制弹终端的操作(改 .claude/ 里的 settings 等):它的终端确认
     #    hook 压不住(issue #41615),所以这里**不做手表审批、不等回执**,只给手表/手机推一条
     #    无按钮的「去终端确认」提醒,然后返回 ask 让终端照常弹。你就不会对着静默终端发呆。
@@ -686,14 +737,27 @@ def main():
 
     opener = make_opener()
 
-    # 3) 防竞态:先记 t0,再发通知,订阅用 since=t0
+    # 3) 防竞态:先记 t0,再发通知,订阅用 since=t0。
+    #    回执 topic 本次审批专属(多窗口互不串台),按钮和订阅用同一个。
+    reply_topic = make_reply_topic()
+    # 调试留痕(需 WATCH_DEBUG_DUMP=1):记下本次回执 topic。出问题时可去 ntfy 拉这个
+    # topic 的历史(GET /<topic>/json?poll=1&since=...),核对按钮实际发的是 allow 还是 deny。
+    if os.environ.get("WATCH_DEBUG_DUMP", "").strip() == "1":
+        try:
+            import tempfile
+            with open(os.path.join(
+                tempfile.gettempdir(), "watch_approve_last_topic_%s.txt" % AGENT
+            ), "w") as _tf:
+                _tf.write(reply_topic)
+        except Exception:
+            pass
     t0 = int(time.time())
     deadline = time.monotonic() + APPROVE_WAIT
 
     title = _PRESET["title"]
     text = desc if desc else "(无详情)"
     try:
-        send_pushcut(opener, title, text)
+        send_pushcut(opener, title, text, reply_topic=reply_topic)
     except urllib.error.HTTPError as e:
         hint = ""
         if e.code == 404:
@@ -708,9 +772,9 @@ def main():
             % type(e).__name__,
         )
 
-    # 4) 等手表回执
+    # 4) 等手表回执(只听本次审批的回执 topic)
     try:
-        decision = wait_for_decision(opener, t0, deadline)
+        decision = wait_for_decision(opener, t0, deadline, reply_topic)
     except Exception:
         decision = None
 

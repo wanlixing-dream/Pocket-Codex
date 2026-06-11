@@ -19,6 +19,7 @@ Claude Code / Codex CLI Stop / StopFailure hook: 任务完成 + 限额提醒。
   * 配置全部从环境变量读(支持同目录 watch.env 兜底),绝不硬编码密钥。
   * fire-and-forget:任何配置缺失 / 异常 / 超时,一律静默 exit 0,
     既不阻塞 agent,也绝不触发 Stop 循环(永不输出 decision=block)。
+  * 多窗口并行:正文末尾带「📁 项目文件夹名」,分清是哪个窗口完成了任务。
 """
 
 import json
@@ -92,6 +93,11 @@ try:
     LIMIT_WARN_PCT = float(os.environ.get("WATCH_LIMIT_WARN_PCT", "90"))
 except ValueError:
     LIMIT_WARN_PCT = 90.0
+
+# 通知正文末尾是否带「📁 项目文件夹名」(hook 输入 cwd 的 basename;Codex 不传 cwd 时
+# 用 hook 进程自己的工作目录兜底)。多窗口并行时靠它分清是哪个窗口完成了任务;
+# 设 WATCH_SHOW_CWD=0 关掉。与审批 hook 共用同一个开关。
+SHOW_CWD = os.environ.get("WATCH_SHOW_CWD", "1").strip() != "0"
 
 
 # ---------- 识别是哪个 agent 在调用:claude(默认)还是 codex ----------
@@ -287,6 +293,22 @@ def read_codex_rate(transcript_path):
     return None
 
 
+def cwd_label(data):
+    """hook 输入里的 cwd -> 项目文件夹名。多窗口并行时贴在正文末尾,
+    分清「是哪个窗口完成了任务」。Codex 的 Stop 输入不带 cwd,
+    退而取 hook 进程自己的工作目录(宿主 agent 启动 hook 时一般就是项目目录)。"""
+    cwd = ""
+    if isinstance(data, dict):
+        cwd = str(data.get("cwd") or "").strip()
+    if not cwd:
+        try:
+            cwd = os.getcwd()
+        except Exception:
+            return ""
+    base = os.path.basename(cwd.rstrip("/\\"))
+    return base or cwd
+
+
 def build_notification(data):
     """根据 hook 输入决定这次发什么:返回 (title, text, sound)。
 
@@ -357,6 +379,11 @@ def main():
         return
 
     title, text, sound = build_notification(data)
+    # 多窗口并行:正文末尾带「📁 项目文件夹名」,分清是哪个窗口完成了任务。
+    if SHOW_CWD:
+        folder = cwd_label(data)
+        if folder:
+            text = (text + "\n📁 " + folder) if text else "📁 " + folder
     send_pushcut(make_opener(), title, text, sound)
     # 不输出任何 JSON、正常 exit 0 -> agent 正常结束,不会触发 Stop 循环。
 

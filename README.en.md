@@ -58,6 +58,7 @@ with ✅ Allow / ❌ Deny buttons, and pings you when each task finishes — no 
 2. **🔔 Done notifications** — every time the agent finishes a turn, your wrist buzzes "task complete".
 3. **🚦 Usage-limit alerts** — get notified the moment your subscription quota runs out (Claude) or is about to (Codex, ≥90% warning by default), with the reset time; turns killed by API errors alert you too.
 4. **🤖 Autopilot for the rest** — non-risky operations are silently auto-approved (configurable), so the terminal never prompts again.
+5. **🪟 Multi-window safe** — run several projects/windows at once without cross-talk: every approval gets its own reply channel, so a tap resolves only its own request; notifications carry a "📁 project folder" line so you can tell who's asking.
 
 Two Python scripts, **standard library only, zero dependencies**, and **fail-safe end to end**: missing config, network failure, or timeout all fall back to the agent's normal in-terminal prompt — your run never hangs.
 
@@ -201,6 +202,16 @@ dies while you're away. That's now on your wrist too, via two different mechanis
 Wiring: for Claude add a `StopFailure` block to your settings hooks (the example includes it);
 Codex needs nothing extra (it rides the existing Stop hook).
 
+## Multi-window / parallel sessions
+
+Running several Claude Code / Codex windows at once? Two things are built in:
+
+- **No cross-talk** — ntfy is pub/sub: with a single shared topic, tapping ✅ on window A's notification would also release window B, which is waiting on the same topic. So every approval uses its **own reply topic** (base topic + random suffix); each notification's buttons resolve only their own request, and a late tap on an expired notification can't accidentally approve a newer one. (Device-tested: two windows waiting concurrently, two taps resolved independently.)
+- **Know who's asking** — approval and done notifications end with a "📁 project folder" line.
+
+Opt out with `WATCH_UNIQUE_TOPIC=0` (shared topic) and `WATCH_SHOW_CWD=0` (no 📁 line).
+Note: app-configured static actions (`PUSHCUT_DYNAMIC_ACTIONS=0`) point at a fixed topic and can only share it — use the default dynamic actions for multi-window.
+
 ## Per-agent look
 
 One script serves both agents (switch via `--agent codex` or `WATCH_AGENT=codex`):
@@ -245,6 +256,8 @@ Override with `PUSHCUT_IMAGE=<url>` (applies to both agents), or `none` to drop 
 | `WATCH_DANGER_REGEX` | — | Replace the built-in danger list entirely |
 | `WATCH_PROTECT_PATHS` | — | Comma-separated substrings; write-tool hits are forced onto the watch |
 | `WATCH_DESC_MAX` | `80` | Max body length (watch screens are small) |
+| `WATCH_UNIQUE_TOPIC` | `1` | Per-request reply topic (base topic + random suffix) so parallel windows never cross-talk; `0` = shared |
+| `WATCH_SHOW_CWD` | `1` | Append "📁 project folder" to notification bodies to tell windows apart; `0` = off |
 
 **Look & done-notification**
 
@@ -292,6 +305,7 @@ Override with `PUSHCUT_IMAGE=<url>` (applies to both agents), or `none` to drop 
 | Tapping says "not supported" on the watch | The action isn't a background web request (default config already is) |
 | No vibration | `PUSHCUT_SOUND=default` (or `vibrateOnly`) |
 | Chinese/emoji shows as `???` in Windows manual tests | PowerShell pipe encoding artifact, not the hook; real runs are unaffected. Feed JSON from a UTF-8 file or env vars when testing |
+| One tap releases every waiting window | Upgrade to a version with `WATCH_UNIQUE_TOPIC` (on by default); static-action mode (`PUSHCUT_DYNAMIC_ACTIONS=0`) can't isolate — use dynamic actions for multi-window |
 
 Every failure path returns "fall back to normal approval" — the agent never hangs because of this hook.
 
