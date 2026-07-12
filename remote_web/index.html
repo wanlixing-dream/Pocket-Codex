@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#151a17">
+  <title>Codex Remote</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main>
+    <header>
+      <div class="brand-mark">C</div>
+      <div>
+        <h1>Codex Remote</h1>
+        <p id="connection">正在连接电脑</p>
+      </div>
+      <button id="new-session" class="icon-button" type="button" title="新建任务" aria-label="新建任务">＋</button>
+      <button id="refresh" class="icon-button" type="button" title="刷新任务" aria-label="刷新任务">↻</button>
+    </header>
+
+    <section class="session-panel" aria-labelledby="session-heading">
+      <div class="section-heading">
+        <h2 id="session-heading">最近任务</h2>
+        <span id="session-count"></span>
+      </div>
+      <div id="sessions" class="sessions" role="listbox" aria-label="Codex 任务"></div>
+    </section>
+
+    <section class="composer" aria-labelledby="composer-heading">
+      <div class="section-heading">
+        <h2 id="composer-heading">继续这个任务</h2>
+        <span id="selected-project">未选择</span>
+      </div>
+      <div id="run-status" class="run-status">等待选择任务</div>
+      <div id="last-response" class="last-response" hidden>
+        <div class="response-heading">
+          <span>Codex 最近回复</span>
+          <button id="open-response" type="button">展开全文</button>
+        </div>
+        <p id="last-response-text"></p>
+      </div>
+      <div id="attachments" class="attachments" hidden></div>
+      <input id="image-picker" type="file" accept="image/*" multiple hidden>
+      <textarea id="prompt" rows="5" maxlength="20000" placeholder="输入后续指令" enterkeyhint="send"></textarea>
+      <div class="composer-actions">
+        <button id="attach" class="attach-button" type="button" title="添加图片" aria-label="添加图片">＋</button>
+        <button id="voice" class="voice-button" type="button" title="语音输入" aria-label="语音输入">🎙</button>
+        <button id="send" class="send-button" type="button" disabled>发送指令</button>
+        <button id="cancel" class="cancel-button" type="button" hidden>■ 停止并修改</button>
+      </div>
+      <pre id="run-output" hidden></pre>
+    </section>
+  </main>
+  <div id="response-overlay" class="response-overlay" role="dialog" aria-modal="true" aria-labelledby="full-response-heading" hidden>
+    <div class="full-response-header">
+      <h2 id="full-response-heading">Codex 完整回复</h2>
+      <button id="close-response" type="button" aria-label="关闭完整回复">×</button>
+    </div>
+    <pre id="full-response-text" class="full-response-text"></pre>
+  </div>
+  <div id="new-session-overlay" class="response-overlay new-session-overlay" role="dialog" aria-modal="true" aria-labelledby="new-session-heading" hidden>
+    <div class="full-response-header">
+      <h2 id="new-session-heading">新建 Codex 任务</h2>
+      <button id="close-new-session" type="button" aria-label="关闭新建任务">×</button>
+    </div>
+    <div class="folder-toolbar">
+      <button id="folder-up" type="button">← 上一级</button>
+      <span id="folder-current">选择位置</span>
+    </div>
+    <div id="folder-list" class="folder-list"></div>
+    <div class="new-session-form">
+      <div class="selected-folder-label">任务文件夹</div>
+      <div id="selected-folder" class="selected-folder">尚未选择</div>
+      <textarea id="new-session-prompt" rows="4" maxlength="20000" placeholder="输入新任务的第一条指令"></textarea>
+      <button id="create-session" class="send-button create-session-button" type="button" disabled>创建并开始</button>
+    </div>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>
