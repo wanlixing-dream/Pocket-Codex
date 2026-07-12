@@ -2,7 +2,7 @@
 
 # PocketCodex
 
-**Connect to and control Codex CLI sessions on your desktop from a phone browser.**
+**Connect to and continue Codex desktop tasks from a phone browser.**
 
 [![CI](https://github.com/wanlixing-dream/Pocket-Codex/actions/workflows/ci.yml/badge.svg)](https://github.com/wanlixing-dream/Pocket-Codex/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE)
@@ -15,19 +15,19 @@
 
 > [!IMPORTANT]
 > PocketCodex is an unofficial, community-built project. It is not affiliated with or endorsed by OpenAI.
-> It runs Codex CLI through `exec` and `exec resume`; it does not remotely automate the Codex desktop GUI.
+> It connects to the `app-server` bundled with the Windows Codex desktop app. It does not require a separate command-line package and is not a remote screen mirror.
 
 ## What it does
 
-- Lists recent Codex sessions stored on your desktop.
-- Sends a new text prompt to an existing session.
-- Creates a session in an allowed project folder.
+- Lists recent tasks from the Codex desktop app.
+- Sends a new prompt to the same desktop thread.
+- Creates a desktop task in an allowed project folder.
 - Uploads JPEG, PNG, or WebP images for Codex to inspect.
 - Shows run status, elapsed time, and output, and can stop an active run.
 - Supports browser speech recognition for voice input.
 - Optionally sends completion and approval notifications through ntfy or Pushcut.
 
-Codex, its sessions, and your project files remain on your desktop. The phone is only a remote client.
+Codex, its threads, and your project files remain on your desktop. The phone is only a remote client.
 
 ## How it works
 
@@ -38,12 +38,13 @@ flowchart LR
     Access -->|Private-network alternative| TS[Tailscale Serve]
     TS --> Server[PocketCodex server<br/>127.0.0.1:8765]
     CF --> Server
-    Server --> Sessions[Read ~/.codex/sessions]
-    Server --> Runner[Start local Codex CLI]
-    Runner -->|New| New[codex exec]
-    Runner -->|Resume| Resume[codex exec resume]
-    New --> Workspace[Local workspace]
-    Resume --> Workspace
+    Server --> Bridge[Connect to desktop app-server]
+    Bridge -->|thread/start| New[Create desktop task]
+    Bridge -->|thread/resume + turn/start| Resume[Continue desktop task]
+    New --> Store[Desktop thread store]
+    Resume --> Store
+    Store --> Desktop[Windows Codex desktop app]
+    Bridge --> Workspace[Local workspace]
     Server -.optional.-> Notify[ntfy / Pushcut]
 ```
 
@@ -53,9 +54,9 @@ See [Architecture](./docs/ARCHITECTURE.md) for component boundaries, request flo
 
 ### Desktop
 
-- Windows 10/11. The core Python server can also run on macOS/Linux, but the bundled automation script is Windows-oriented.
+- Windows 10/11. The current release integrates with the Microsoft Store Codex desktop app for Windows.
 - Python 3.10 or newer.
-- [Codex CLI](https://developers.openai.com/codex/cli) installed, available on `PATH`, and signed in.
+- The **Windows Codex desktop app** installed from Microsoft Store and signed in.
 - One remote access option:
   - Default setup: [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)
   - Private-network alternative: [Tailscale](https://tailscale.com/download)
@@ -76,10 +77,9 @@ The Python server uses only the standard library. There is no `pip install` step
 git clone https://github.com/wanlixing-dream/Pocket-Codex.git
 cd Pocket-Codex
 python --version
-codex --version
 ```
 
-Make sure Codex CLI is signed in and can run a task locally.
+Open the Codex desktop app, sign in, and confirm that it can create a local task. PocketCodex discovers the app's bundled app-server automatically; no `codex` command is required on `PATH`.
 
 ### 2. Start PocketCodex
 
@@ -87,10 +87,10 @@ Make sure Codex CLI is signed in and can run a task locally.
 python .\remote_codex_server.py
 ```
 
-The server listens only on `http://127.0.0.1:8765` by default. On first start it creates a private `remote.env` containing a random access token. Open the printed local URL on the desktop first and confirm that the session list loads.
+The server listens only on `http://127.0.0.1:8765` by default. On first start it creates a private `remote.env` containing a random access token. Open the printed local URL on the desktop first and confirm that the desktop task list loads.
 
 > [!WARNING]
-> Never commit, screenshot, or publicly share `remote.env`. Anyone with its token may be able to send instructions to your local Codex sessions.
+> Never commit, screenshot, or publicly share `remote.env`. Anyone with its token may be able to send instructions to your Codex desktop threads.
 
 ### 3. Connect with Cloudflare Quick Tunnel (default)
 
@@ -127,15 +127,15 @@ Stop sharing with `tailscale serve reset`.
 
 ### 5. Use the mobile client
 
-1. Select an item from Recent Sessions.
+1. Select a Codex desktop thread from Recent Tasks.
 2. Enter a prompt and optionally attach up to four images.
-3. Send it to run `codex exec resume` on the desktop.
-4. Use the `+` button to choose a folder and create a new session.
+3. Send it to continue that thread through the desktop app's bundled app-server.
+4. Use the `+` button to choose a folder and create a new desktop task.
 5. Watch the run state, inspect output, or stop the process.
 
 ## Allowed project roots
 
-The new-session folder picker only exposes `Desktop` and `Documents` by default. This is an explicit allowlist, not a refresh problem.
+The new-task folder picker only exposes `Desktop` and `Documents` by default. This is an explicit allowlist, not a refresh problem.
 
 Complete one first start so PocketCodex generates a secure token, then add `REMOTE_CODEX_ROOTS` to `remote.env`. Separate Windows paths with semicolons:
 
@@ -143,13 +143,7 @@ Complete one first start so PocketCodex generates a secure token, then add `REMO
 REMOTE_CODEX_ROOTS=C:\Users\you\Desktop;C:\Users\you\source;D:\Projects
 ```
 
-Use colons on macOS/Linux:
-
-```dotenv
-REMOTE_CODEX_ROOTS=/Users/you/Desktop:/Users/you/Projects
-```
-
-Restart PocketCodex after changing the setting. The allowlist controls where a new session may start; it is not a filesystem sandbox for Codex and does not restrict existing sessions.
+Restart PocketCodex after changing the setting. The allowlist controls where a new task may start; it is not a filesystem sandbox for Codex and does not restrict existing threads.
 
 ## Configuration
 
@@ -159,7 +153,7 @@ Start from [`remote.env.example`](./remote.env.example), or let PocketCodex crea
 # At least 24 characters. A long random value is recommended.
 REMOTE_CODEX_TOKEN=replace-with-a-long-random-token
 
-# Optional roots for new sessions.
+# Optional roots for new desktop tasks.
 REMOTE_CODEX_ROOTS=C:\Users\you\Desktop;D:\Projects
 ```
 
@@ -167,14 +161,14 @@ The real `remote.env` is excluded by `.gitignore`.
 
 ## Optional notifications and approvals
 
-The hook scripts are optional and are not required for mobile session control:
+The hook scripts are optional and are not required for mobile desktop-task control:
 
 - `watch_done.py` sends completion, failure, and usage-limit notifications.
 - `watch_approve.py` forwards supported interactive Codex or Claude Code approvals to a phone or watch.
 - ntfy supports phone and Wear OS notifications.
 - Pushcut can provide richer iPhone and Apple Watch actions.
 
-PocketCodex remote runs use non-interactive `codex exec`; do not treat watch approval as a guaranteed protection layer for those runs. See [Notifications and approvals](./docs/NOTIFICATIONS.md).
+PocketCodex uses its own app-server connection. Interactive approval requests are not automatically transferred to another open desktop window; the current remote endpoint rejects unsupported requests instead of approving them. See [Notifications and approvals](./docs/NOTIFICATIONS.md).
 
 ## Security
 
@@ -186,15 +180,16 @@ PocketCodex can start Codex on your machine and should be treated as a remote ad
 - Do not share URLs containing `#token=` or `?token=`.
 - Rotate the token and reset the tunnel if a URL or token may have leaked.
 - Allow only project roots that you genuinely need remotely.
-- `REMOTE_CODEX_ROOTS` limits the new-session picker only. Codex permissions are still governed by its sandbox, approval policy, and the desktop user account.
+- `REMOTE_CODEX_ROOTS` limits the new-task picker only. Codex permissions are still governed by its sandbox, approval policy, and the desktop user account.
 - A valid client can read recent prompt/response metadata and send new instructions.
 - Stop cloudflared and PocketCodex when they are not in use; Quick Tunnel is not a private network.
 
 ## Current limitations
 
-- This is a CLI session companion, not a live mirror of Codex desktop or TUI windows.
-- Only one PocketCodex run may be active for a given session.
-- The server lists the 30 most recent sessions by default.
+- PocketCodex shares persistent threads with the desktop app, but it is not a live screen mirror. Do not submit to the same thread from phone and desktop at the same time.
+- The desktop `app-server` is an internal interface and may require compatibility updates after a Codex desktop release.
+- Only one PocketCodex run may be active for a given thread.
+- The server lists the 30 most recent desktop threads by default.
 - Prompts are limited to 20,000 characters.
 - Each request accepts up to four JPEG/PNG/WebP images, 8 MB each.
 - Runs time out after six hours and retain the final 30,000 output characters in memory.
@@ -206,7 +201,7 @@ PocketCodex can start Codex on your machine and should be treated as a remote ad
 
 ```text
 Pocket-Codex/
-├── remote_codex_server.py   # API, authentication, session parsing, process management
+├── remote_codex_server.py   # API, authentication, desktop discovery, app-server client
 ├── remote_web/              # Mobile HTML/CSS/JavaScript client
 ├── start_remote_codex.ps1   # Windows Quick Tunnel helper
 ├── watch_approve.py         # Optional approval hook
@@ -223,7 +218,7 @@ python -m unittest discover -s tests -v
 python -m py_compile remote_codex_server.py watch_approve.py watch_done.py
 ```
 
-CI runs without network access on Windows, macOS, and Linux.
+Core unit tests run without network access; desktop discovery and end-to-end app-server verification are Windows-specific.
 
 ## Troubleshooting
 
@@ -231,10 +226,10 @@ CI runs without network access on Windows, macOS, and Linux.
 | --- | --- |
 | The phone shows `Unauthorized` | Reopen a URL with the current `#token=`; after rotation, clear this site's browser storage |
 | Projects outside Desktop/Documents are missing | Add `REMOTE_CODEX_ROOTS` to the generated `remote.env`, then restart the server |
-| The session list is empty | Complete at least one desktop Codex CLI session and verify that `~/.codex/sessions` exists |
+| The task list is empty | Complete at least one task in the Codex desktop app under the same Windows account |
 | The phone cannot connect | Verify that the Python server is running, then inspect `tailscale serve status` or the cloudflared console |
-| `codex` is not found | Install/sign in to Codex CLI and ensure it is on the current user's `PATH` |
-| A remote run hits a permission error | Inspect the desktop Codex sandbox/approval configuration; non-interactive `exec` is not the TUI approval flow |
+| Codex desktop cannot be found | Install and launch Codex from Microsoft Store, or set `REMOTE_CODEX_DESKTOP_EXE` to its bundled `codex.exe` |
+| A remote run needs approval | Return to the Codex desktop app; PocketCodex never auto-approves unsupported sensitive actions |
 
 Contributions are welcome. Changes involving authentication, filesystem access, or command execution should document their threat model and verification evidence.
 

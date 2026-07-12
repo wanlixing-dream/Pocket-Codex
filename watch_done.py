@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Claude Code / Codex CLI Stop / StopFailure hook: 任务完成 + 限额提醒。
+Claude Code / Codex 桌面版 Stop / StopFailure hook: 任务完成 + 限额提醒。
 
 三种通知(都是纯提醒:没有按钮、不需回复,看一眼即可):
   * Stop(正常完成)          ->「🦀/🤖 任务已完成」
@@ -110,7 +110,7 @@ SHOW_CWD = os.environ.get("WATCH_SHOW_CWD", "1").strip() != "0"
 
 
 # ---------- 识别是哪个 agent 在调用:claude(默认)还是 codex ----------
-# 同一份脚本同时服务 Claude Code 和 Codex CLI,两边通知用不同的标题和配图区分。
+# 同一份脚本同时服务 Claude Code 和 Codex,两边通知用不同的标题和配图区分。
 # 优先级:命令行 --agent(在 hooks 接线处显式声明,最可靠)> 环境变量 WATCH_AGENT > claude。
 # Codex 侧 ~/.codex/hooks.json 的 command 带 "--agent codex";Claude 侧 settings.json 不带。
 def _detect_agent():

@@ -71,7 +71,7 @@ python .\watch_approve.py --print-codex-config
 
 将输出合并到 Codex hook 配置，也可以参考 [`examples/codex/hooks.example.json`](../examples/codex/hooks.example.json)。
 
-修改 hook 后，在 Codex TUI 中运行 `/hooks`，检查并信任对应 hook。未信任或修改后未重新信任的 hook 可能被静默跳过。
+修改 hook 后，在支持 hook 管理的 Codex 交互界面中检查并信任对应 hook。未信任或修改后未重新信任的 hook 可能被静默跳过。
 
 ## 5. 分别测试
 
@@ -83,14 +83,14 @@ python .\watch_approve.py --print-codex-config
 '{"event_name":"Stop","last_assistant_message":"PocketCodex notification test"}' | python .\watch_done.py
 ```
 
-真实运行时，Codex 的交互式 TUI 与 `codex exec` 的 hook 行为可能不同。PocketCodex 远程任务使用 `codex exec`，不要把手机远程审批当作所有非交互任务都必然触发的安全边界。
+PocketCodex 通过独立的桌面 app-server 运行任务。该连接收到的审批请求不会自动出现在另一个已打开的桌面窗口中；当前远程端不会自动批准未支持的敏感操作，因此不要把通知脚本当作唯一安全边界。
 
 ## 6. 与 PocketCodex 的关系
 
-- `remote_codex_server.py` 负责远程 session 控制。
+- `remote_codex_server.py` 负责远程桌面 thread 控制。
 - `watch_done.py` 和 `watch_approve.py` 由 Codex/Claude Code hook 调用。
 - `start_remote_codex.ps1` 可在特定 Windows 环境中启动 Quick Tunnel，并通过现有 ntfy 配置发送新 URL。
-- 不配置通知脚本时，PocketCodex 的 session 列表、新建、继续、图片上传和停止功能仍可使用。
+- 不配置通知脚本时，PocketCodex 的桌面任务列表、新建、继续、图片上传和停止功能仍可使用。
 
 ## 安全提示
 
@@ -98,4 +98,3 @@ python .\watch_approve.py --print-codex-config
 - 不要在公开仓库、Issue、截图或日志中暴露这些值。
 - 审批通知超时或网络异常时，应回退到 Codex 本机的正常审批机制。
 - 不要把通知按钮视为替代 Codex sandbox 和本机权限控制的唯一防线。
-

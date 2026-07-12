@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Claude Code / Codex CLI PreToolUse hook: 手表远程批准 (watch remote approval).
+Claude Code / Codex 桌面版 PreToolUse hook: 手表远程批准 (watch remote approval).
 
 链路(默认 pushcut 载体,苹果设备):
   stdin(JSON)
@@ -196,7 +196,7 @@ _OPT_LETTERS = "ABCD"  # AskUserQuestion 一题最多 4 个选项
 _OPT_LABEL_MAX = 24    # 正文里每个选项标签最多保留的字符数(约手表一行的量)
 
 # ---------- 识别是哪个 agent 在调用:claude(默认)还是 codex ----------
-# 同一份脚本同时服务 Claude Code 和 Codex CLI,两边通知用不同的标题和配图区分。
+# 同一份脚本同时服务 Claude Code 和 Codex,两边通知用不同的标题和配图区分。
 # 优先级:命令行 --agent(在 hooks 接线处显式声明,最可靠)> 环境变量 WATCH_AGENT > claude。
 # Codex 侧 ~/.codex/hooks.json 的 command 带 "--agent codex";Claude 侧 settings.json 不带。
 def _detect_agent():
@@ -1505,7 +1505,7 @@ def print_config(argv):
                     {"type": "command", "command": cmd("watch_done.py", "codex"), "timeout": 60}]}],
             }
         }
-        _say("# 存为 ~/.codex/hooks.json;改完在 Codex TUI 里跑 /hooks 重新信任这两条 hook:", err=True)
+        _say("# 存为 ~/.codex/hooks.json;改完后在 Codex 的 hook 管理界面重新信任这两条 hook:", err=True)
         _say(json.dumps(cfg, ensure_ascii=False, indent=2))
     return 0
 

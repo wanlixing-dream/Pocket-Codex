@@ -34,10 +34,10 @@ Append `#token=...` to the reported tailnet URL. Tailscale adds device identity 
 
 ## What the remote service controls
 
-- It reads recent sessions from `~/.codex/sessions`.
-- It starts new work through `codex exec`.
-- It continues a known local session through `codex exec resume`.
-- It does not remotely control the Codex desktop GUI.
-- It does not make the optional approval hook a security boundary for non-interactive remote runs.
+- It reads threads created by the Windows Codex desktop app.
+- It discovers and starts the `app-server` bundled with that desktop app.
+- It creates work with `thread/start` and continues it with `thread/resume` plus `turn/start`.
+- It does not require a separate command-line package or automate the desktop with mouse input.
+- It never auto-approves unsupported app-server requests.
 
 See [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) for the complete trust model.

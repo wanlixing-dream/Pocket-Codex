@@ -4,9 +4,9 @@
 
 ## 1. 系统边界
 
-PocketCodex 是运行在用户桌面电脑上的轻量 HTTP 服务。手机浏览器通过安全隧道访问该服务，服务再读取本机 Codex session 记录并启动 Codex CLI 子进程。
+PocketCodex 是运行在用户桌面电脑上的轻量 HTTP 服务。手机浏览器通过安全隧道访问该服务，服务再连接 Windows Codex 桌面 App 随附的 `app-server`，读取、新建或继续同一份持久化 thread。
 
-它不包含云端业务服务器，不把项目文件同步到 PocketCodex 自有云端，也不控制 Codex 桌面图形界面的窗口。
+它不包含云端业务服务器，不把项目文件同步到 PocketCodex 自有云端，也不通过鼠标或窗口自动化控制 Codex。PocketCodex 与桌面窗口共享 thread 存储，但两者使用各自的 app-server 进程。
 
 ```mermaid
 flowchart TB
@@ -22,13 +22,15 @@ flowchart TB
     subgraph Desktop[桌面电脑]
         HTTP[PocketCodex HTTP 服务<br/>127.0.0.1:8765]
         Auth[令牌认证]
-        SessionStore[SessionStore]
+        SessionStore[DesktopSessionStore]
         FolderBrowser[FolderBrowser]
         RunManager[RunManager]
-        SessionFiles[~/.codex/sessions/*.jsonl]
-        Roots[新 session 允许的起始目录]
-        Workspaces[本机 session 工作目录]
-        Codex[Codex CLI 子进程]
+        SessionFiles[桌面 App thread 存储]
+        Roots[新任务允许的起始目录]
+        Workspaces[本机 thread 工作目录]
+        Locator[Codex Desktop 定位器]
+        AppServer[桌面 App 随附 app-server]
+        DesktopApp[Windows Codex 桌面窗口]
         Uploads[.remote_uploads]
     end
 
@@ -42,10 +44,13 @@ flowchart TB
     Auth --> RunManager
     SessionStore --> SessionFiles
     FolderBrowser --> Roots
-    RunManager --> Codex
+    RunManager --> Locator
+    Locator --> AppServer
+    AppServer --> SessionFiles
+    DesktopApp --> SessionFiles
     RunManager --> Uploads
-    Codex --> Workspaces
-    Roots -.选择新 session cwd.-> Workspaces
+    AppServer --> Workspaces
+    Roots -.选择新桌面任务的工作目录.-> Workspaces
 ```
 
 ## 2. 组件职责
@@ -54,10 +59,10 @@ flowchart TB
 
 目录：`remote_web/`
 
-- 调用 `/api/sessions` 展示最近 session。
-- 调用 `/api/runs` 继续已有 session。
-- 调用 `/api/sessions/new` 在选定工作目录中新建 session。
-- 每 2.5 秒轮询当前 run，每 5 秒刷新 session 列表。
+- 调用 `/api/sessions` 展示桌面版最近任务。
+- 调用 `/api/runs` 继续已有 thread。
+- 调用 `/api/sessions/new` 在选定工作目录中新建桌面任务。
+- 每 2.5 秒轮询当前 run，每 5 秒刷新任务列表。
 - 在浏览器端压缩图片并随 JSON 请求上传。
 - 从 URL fragment 读取首次访问令牌，保存到浏览器 `localStorage`，后续通过 `X-Remote-Codex-Token` 请求头发送。
 
@@ -71,60 +76,69 @@ flowchart TB
 - 对 API 使用常量时间比较验证请求头、查询参数或 Cookie 中的令牌。
 - 对静态响应和 API 响应设置 `no-store`，并禁止页面被嵌入 iframe。
 
-### SessionStore
+### DesktopSessionStore
 
-- 扫描 `~/.codex/sessions` 中最近修改的 `rollout-*.jsonl`。
-- 读取 session ID、工作目录、用户指令和最近的 assistant 响应。
-- 忽略注入的系统上下文，只提取实际用户指令。
-- 默认返回最近 30 个 session。
+- 通过 app-server 的 `thread/list` 获取桌面版任务索引。
+- 将 thread ID、工作目录、名称、预览和更新时间转换为移动端任务摘要。
+- 默认返回桌面版最近 30 个 thread。
 
 ### FolderBrowser
 
-- 维护允许新建 session 的项目根目录白名单。
+- 维护允许新建桌面任务的项目根目录白名单。
 - 默认根目录是当前用户的 `Desktop` 和 `Documents`。
 - `REMOTE_CODEX_ROOTS` 可覆盖默认根目录。
 - 拒绝不存在、不是目录或逃逸到白名单外的路径。
 - 只列出非隐藏子目录，单层最多 250 个。
 
-### RunManager
+### DesktopAppLocator
 
-- 新任务执行 `codex exec --skip-git-repo-check -`。
-- 已有任务执行 `codex exec resume --skip-git-repo-check <SESSION_ID> -`。
-- 用户指令通过标准输入传给 Codex。
-- 使用 session 的原始工作目录作为子进程 `cwd`。
-- 捕获标准输出并返回移动端。
+- 优先读取 `REMOTE_CODEX_DESKTOP_EXE` 显式路径。
+- 自动查找 `%LOCALAPPDATA%\OpenAI\Codex\bin\*\codex.exe` 中桌面 App 缓存的 app-server。
+- 必要时通过 `Get-AppxPackage OpenAI.Codex` 获取 Microsoft Store 安装目录。
+- 不会回退到 `PATH` 上的同名命令，确保始终使用桌面 App 随附的 app-server。
+
+### AppServerClient 与 RunManager
+
+- 启动 Codex 桌面 App 随附的 `codex.exe ... app-server --stdio`。
+- 通过逐行 JSON 协议完成 `initialize` 握手。
+- 新任务依次调用 `thread/start` 和 `turn/start`。
+- 已有任务依次调用 `thread/resume` 和 `turn/start`。
+- 监听 `item/agentMessage/delta`、`item/completed` 和 `turn/completed`，把桌面任务状态与最终回答返回移动端。
+- 使用 `turn/interrupt` 停止任务，不会终止 Codex 桌面 App。
+- 对未知或未支持的交互式 server request 返回错误，绝不自动批准敏感操作。
 - 维护 queued、running、completed、failed、cancelled 等运行状态。
-- Windows 下使用独立进程组，以便停止任务。
 
 ### 图片上传
 
 - 浏览器先缩放和压缩图片。
 - 服务端重新验证 Base64、图片签名、数量和大小。
 - 每次最多 4 张，每张最大 8 MB，仅接受 JPEG、PNG、WebP。
-- 文件临时保存在 `.remote_uploads/`，并通过 Codex CLI 的 `--image` 参数传入。
+- 文件临时保存在 `.remote_uploads/`，并作为 app-server 的 `localImage` 输入传入桌面任务。
 - run 正常结束、失败或取消后的 `finally` 阶段会删除图片；服务进程异常退出时可能遗留文件。
 
 ## 3. 关键请求流程
 
-### 继续已有 session
+### 继续已有桌面任务
 
 ```mermaid
 sequenceDiagram
     participant U as 手机用户
     participant W as 移动 Web
     participant S as PocketCodex 服务
-    participant F as ~/.codex/sessions
-    participant C as Codex CLI
+    participant F as 桌面 App thread 存储
+    participant C as Codex Desktop app-server
 
     U->>W: 打开页面
     W->>S: GET /api/sessions
-    S->>F: 扫描并解析最近 session
-    F-->>S: session 元数据
-    S-->>W: session 列表
-    U->>W: 选择 session 并发送指令
+    S->>C: thread/list
+    C->>F: 读取桌面 thread 索引
+    F-->>C: thread 元数据
+    C-->>S: thread 列表
+    S-->>W: 最近任务
+    U->>W: 选择 thread 并发送指令
     W->>S: POST /api/runs
-    S->>S: 校验令牌和 session ID
-    S->>C: codex exec resume ID -
+    S->>S: 校验令牌和 thread ID
+    S->>C: thread/resume + turn/start
     C-->>S: stdout / 状态
     loop 任务运行中
         W->>S: GET /api/runs/{id}
@@ -132,7 +146,7 @@ sequenceDiagram
     end
 ```
 
-### 新建 session
+### 新建桌面任务
 
 ```mermaid
 sequenceDiagram
@@ -140,17 +154,17 @@ sequenceDiagram
     participant W as 移动 Web
     participant S as PocketCodex 服务
     participant D as 项目目录
-    participant C as Codex CLI
+    participant C as Codex Desktop app-server
 
     W->>S: GET /api/folders
     S-->>W: 允许的项目根目录
     U->>W: 进入目录并输入第一条指令
     W->>S: POST /api/sessions/new
     S->>S: 解析真实路径并验证白名单
-    S->>C: codex exec - (cwd=项目目录)
+    S->>C: thread/start + turn/start (cwd=项目目录)
     C->>D: 读取或修改项目文件
-    C-->>S: 输出 session ID 与结果
-    S-->>W: 新 session 状态
+    C-->>S: 输出 thread ID 与结果
+    S-->>W: 新桌面任务状态
 ```
 
 ## 4. 网络模型
@@ -181,22 +195,24 @@ sequenceDiagram
 
 - 默认仅监听 `127.0.0.1`。
 - API 需要随机令牌，比较使用 `hmac.compare_digest`。
-- session 只能从本机 session 存储中选择，不能提交任意 session ID。
-- 新 session 的工作目录受根目录白名单约束。
+- thread 只能从桌面 App 返回的任务索引中选择，不能提交任意 thread ID。
+- 新桌面任务的工作目录受根目录白名单约束。
 - 图片数量、大小、格式和整体请求大小受限。
 - 响应禁止缓存，并设置基础浏览器安全头。
 
 ### 不在保证范围内
 
 - 令牌不是多用户账户系统，没有权限角色、过期时间或设备撤销列表。
-- 拿到有效令牌的调用方可以向允许的 Codex session 发送任意自然语言指令。
-- 根目录白名单只约束新 session 的起始目录，不约束已有 session，也不是 Codex 的文件系统沙箱。
-- Codex 最终可执行的文件和命令范围仍由 Codex CLI 自身的 sandbox、approval policy 和本机权限决定。
-- 远程链路使用非交互 `codex exec`，不能依赖交互式 `PermissionRequest` hook 保护这些任务。
+- 拿到有效令牌的调用方可以向桌面版 Codex thread 发送任意自然语言指令。
+- 根目录白名单只约束新任务的起始目录，不约束已有 thread，也不是 Codex 的文件系统沙箱。
+- Codex 最终可执行的文件和命令范围仍由桌面 App app-server 的 sandbox、approval policy 和本机权限决定。
+- PocketCodex 的 app-server 与已打开桌面窗口的 app-server 是两个进程。未支持的审批不会自动转移到桌面窗口，PocketCodex 也不会自动批准。
 - Quick Tunnel 随机 URL 不是访问控制。
 - 上传图片在 run 收尾阶段自动清理，但服务异常终止可能遗留文件；运行输出仅保存在进程内存中。
 - 进程内 run 状态在服务重启后不会恢复。
 - 停止进程不会回滚 Codex 已经完成的文件修改。
+- 两个 app-server 不共享实时内存事件，不应同时向同一 thread 发送 turn。
+- `app-server` 属于 Codex 桌面 App 内部接口，桌面版升级可能引入协议兼容变化。
 
 ### 部署原则
 
@@ -228,7 +244,7 @@ flowchart LR
 
 ## 7. 后续架构方向
 
-- 将启动、隧道和配置检查收敛为跨平台 CLI。
+- 将启动、隧道和配置检查收敛为统一的 Windows 配置向导。
 - 用可撤销、可过期的设备凭证替代单一长期令牌。
 - 增加持久化 run 记录和上传文件清理策略。
 - 增加结构化日志、健康状态和诊断导出。

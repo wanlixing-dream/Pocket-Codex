@@ -11,7 +11,6 @@ import json
 import os
 import re
 import secrets
-import shutil
 import subprocess
 import threading
 import time
@@ -22,7 +21,7 @@ from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, TextIO
 from urllib.parse import parse_qs, urlparse
 
 
@@ -38,6 +37,246 @@ MAX_PROMPT_CHARS = 20_000
 MAX_IMAGES = 4
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 MAX_REQUEST_BYTES = MAX_PROMPT_CHARS * 4 + MAX_IMAGES * (MAX_IMAGE_BYTES * 4 // 3 + 1024)
+
+
+def locate_codex_desktop_executable() -> Path:
+    """Locate the executable bundled with Codex Desktop without using PATH."""
+    configured = os.environ.get("REMOTE_CODEX_DESKTOP_EXE", "").strip()
+    if configured:
+        path = Path(configured).expanduser().resolve()
+        if path.is_file():
+            return path
+        raise FileNotFoundError(f"REMOTE_CODEX_DESKTOP_EXE does not exist: {path}")
+
+    local_app_data = os.environ.get("LOCALAPPDATA", "").strip()
+    if local_app_data:
+        candidates = sorted(
+            (Path(local_app_data) / "OpenAI" / "Codex" / "bin").glob("*/codex.exe"),
+            key=lambda item: item.stat().st_mtime,
+            reverse=True,
+        )
+        if candidates:
+            return candidates[0].resolve()
+
+    if os.name == "nt":
+        powershell = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+        try:
+            result = subprocess.run(
+                [
+                    str(powershell),
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    "(Get-AppxPackage -Name OpenAI.Codex | Select-Object -First 1 -ExpandProperty InstallLocation)",
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=10,
+                check=False,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            install_location = result.stdout.strip()
+            install_root = Path(install_location) if install_location else None
+            if result.returncode == 0 and install_root and install_root.is_dir():
+                app_server = install_root / "app" / "resources" / "codex.exe"
+                if app_server.is_file():
+                    return app_server.resolve()
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    raise FileNotFoundError(
+        "Codex Desktop was not found. Install the Windows Codex app or set REMOTE_CODEX_DESKTOP_EXE."
+    )
+
+
+class NDJSONTransport:
+    def __init__(self, executable: Path) -> None:
+        creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+        self.process = subprocess.Popen(
+            [
+                str(executable),
+                "-c",
+                "features.code_mode_host=true",
+                "app-server",
+                "--stdio",
+                "--analytics-default-enabled",
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            bufsize=1,
+            creationflags=creationflags,
+        )
+        if not self.process.stdin or not self.process.stdout:
+            raise RuntimeError("Could not open Codex Desktop app-server pipes.")
+        self.reader: TextIO = self.process.stdout
+        self.writer: TextIO = self.process.stdin
+        self.error_reader: TextIO | None = self.process.stderr
+        self.last_error = ""
+        if self.error_reader:
+            threading.Thread(target=self._drain_stderr, daemon=True).start()
+
+    def _drain_stderr(self) -> None:
+        assert self.error_reader is not None
+        for line in self.error_reader:
+            text = line.strip()
+            if text:
+                self.last_error = (self.last_error + "\n" + text)[-4000:].strip()
+
+    def send(self, message: dict[str, Any]) -> None:
+        self.writer.write(json.dumps(message, ensure_ascii=False) + "\n")
+        self.writer.flush()
+
+    def receive(self) -> dict[str, Any] | None:
+        line = self.reader.readline()
+        if not line:
+            return None
+        return json.loads(line)
+
+    def close(self) -> None:
+        try:
+            if not self.writer.closed:
+                self.writer.close()
+        except OSError:
+            pass
+        if self.process.poll() is None:
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+                self.process.wait(timeout=3)
+        for stream in (self.reader, self.error_reader):
+            try:
+                if stream and not stream.closed:
+                    stream.close()
+            except OSError:
+                pass
+
+
+class AppServerClient:
+    """Thread-safe JSON-RPC-like client for the Codex Desktop app-server."""
+
+    def __init__(self, executable: Path | None = None, transport: Any | None = None) -> None:
+        self.transport = transport or NDJSONTransport(executable or locate_codex_desktop_executable())
+        self._write_lock = threading.Lock()
+        self._state_lock = threading.Lock()
+        self._next_id = 1
+        self._pending: dict[int, tuple[threading.Event, dict[str, Any]]] = {}
+        self._listeners: list[Callable[[str, dict[str, Any]], None]] = []
+        self._closed_error: Exception | None = None
+        self._reader = threading.Thread(target=self._read_loop, daemon=True)
+        self._reader.start()
+        try:
+            self.request(
+                "initialize",
+                {
+                    "clientInfo": {"name": "pocket-codex", "title": "PocketCodex", "version": "1.0.0"},
+                    "capabilities": {"experimentalApi": True},
+                },
+            )
+            self.notify("initialized", {})
+        except Exception:
+            self.transport.close()
+            raise
+
+    def add_listener(self, listener: Callable[[str, dict[str, Any]], None]) -> None:
+        with self._state_lock:
+            self._listeners.append(listener)
+
+    @property
+    def closed(self) -> bool:
+        with self._state_lock:
+            return self._closed_error is not None
+
+    def request(self, method: str, params: dict[str, Any] | None = None, timeout: float = 30) -> Any:
+        event = threading.Event()
+        holder: dict[str, Any] = {}
+        with self._state_lock:
+            if self._closed_error:
+                raise RuntimeError(str(self._closed_error))
+            request_id = self._next_id
+            self._next_id += 1
+            self._pending[request_id] = (event, holder)
+        self._send({"id": request_id, "method": method, "params": params or {}})
+        if not event.wait(timeout):
+            with self._state_lock:
+                self._pending.pop(request_id, None)
+            raise TimeoutError(f"Codex Desktop did not answer {method} within {timeout:g} seconds.")
+        if "error" in holder:
+            error = holder["error"]
+            detail = error.get("message", str(error)) if isinstance(error, dict) else str(error)
+            raise RuntimeError(f"Codex Desktop {method} failed: {detail}")
+        return holder.get("result")
+
+    def notify(self, method: str, params: dict[str, Any] | None = None) -> None:
+        self._send({"method": method, "params": params or {}})
+
+    def close(self) -> None:
+        self._fail_connection(RuntimeError("PocketCodex closed the Codex Desktop app-server connection."))
+        self.transport.close()
+
+    def _fail_connection(self, exc: Exception) -> None:
+        with self._state_lock:
+            if self._closed_error is not None:
+                return
+            self._closed_error = exc
+            pending = list(self._pending.values())
+            self._pending.clear()
+            listeners = list(self._listeners)
+        for event, holder in pending:
+            holder["error"] = {"message": str(exc)}
+            event.set()
+        for listener in listeners:
+            try:
+                listener("app-server/closed", {"error": str(exc)})
+            except Exception:
+                continue
+
+    def _send(self, message: dict[str, Any]) -> None:
+        with self._write_lock:
+            self.transport.send(message)
+
+    def _read_loop(self) -> None:
+        try:
+            while True:
+                message = self.transport.receive()
+                if message is None:
+                    detail = str(getattr(self.transport, "last_error", "") or "").strip()
+                    suffix = f" Last error: {detail}" if detail else ""
+                    raise RuntimeError(f"Codex Desktop app-server closed the connection.{suffix}")
+                if "id" in message and ("result" in message or "error" in message):
+                    with self._state_lock:
+                        pending = self._pending.pop(message["id"], None)
+                    if pending:
+                        event, holder = pending
+                        holder.update(message)
+                        event.set()
+                    continue
+                if "id" in message and "method" in message:
+                    self._send(
+                        {
+                            "id": message["id"],
+                            "error": {"code": -32601, "message": f"Unsupported server request: {message['method']}"},
+                        }
+                    )
+                    continue
+                method = message.get("method")
+                if isinstance(method, str):
+                    params = message.get("params") if isinstance(message.get("params"), dict) else {}
+                    with self._state_lock:
+                        listeners = list(self._listeners)
+                    for listener in listeners:
+                        try:
+                            listener(method, params)
+                        except Exception:
+                            continue
+        except Exception as exc:
+            self._fail_connection(exc)
 
 
 def load_env(path: Path) -> None:
@@ -236,6 +475,55 @@ class SessionStore:
         )
 
 
+class DesktopSessionStore:
+    """Session facade backed by the Codex Desktop app-server thread index."""
+
+    def __init__(self, client_provider: Callable[[], AppServerClient], limit: int = 30) -> None:
+        self.client_provider = client_provider
+        self.limit = limit
+
+    def list(self) -> list[SessionInfo]:
+        result = self.client_provider().request(
+            "thread/list",
+            {
+                "archived": False,
+                "cursor": None,
+                "limit": self.limit,
+                "modelProviders": None,
+                "sortKey": "updated_at",
+            },
+        )
+        threads = result.get("data", []) if isinstance(result, dict) else []
+        return [session for item in threads if isinstance(item, dict) and (session := self._from_thread(item))]
+
+    def get(self, session_id: str) -> SessionInfo | None:
+        return next((item for item in self.list() if item.id == session_id), None)
+
+    @staticmethod
+    def _from_thread(thread: dict[str, Any]) -> SessionInfo | None:
+        thread_id = thread.get("id")
+        if not isinstance(thread_id, str) or not SESSION_ID_RE.fullmatch(thread_id):
+            return None
+        cwd = str(thread.get("cwd") or "")
+        preview = str(thread.get("preview") or "").strip()
+        title = str(thread.get("name") or "").strip() or preview or "Codex desktop task"
+        raw_updated = thread.get("updatedAt") or thread.get("createdAt") or time.time()
+        try:
+            updated = float(raw_updated)
+        except (TypeError, ValueError):
+            updated = time.time()
+        return SessionInfo(
+            id=thread_id,
+            cwd=cwd,
+            project=Path(cwd).name if cwd else "Codex Desktop",
+            updated_at=updated,
+            updated_label=datetime.fromtimestamp(updated).strftime("%m-%d %H:%M"),
+            title=_shorten(title, 72),
+            last_prompt=_shorten(preview or title, 140),
+            last_response="",
+        )
+
+
 def default_folder_roots() -> list[Path]:
     configured = os.environ.get("REMOTE_CODEX_ROOTS", "").strip()
     candidates = [Path(item) for item in configured.split(os.pathsep) if item.strip()] if configured else [
@@ -308,14 +596,76 @@ class RunInfo:
 
 
 class RunManager:
-    def __init__(self, codex_command: str = "codex") -> None:
-        self.codex_command = codex_command
+    def __init__(
+        self,
+        client: AppServerClient | None = None,
+        client_factory: Callable[[], AppServerClient] | None = None,
+        turn_timeout: float = 60 * 60 * 6,
+        interrupt_grace: float = 10,
+    ) -> None:
+        self.client = client
+        self.client_factory = client_factory or AppServerClient
+        self.turn_timeout = turn_timeout
+        self.interrupt_grace = interrupt_grace
         self.runs: dict[str, RunInfo] = {}
         self.latest_by_session: dict[str, str] = {}
-        self.active_sessions: set[str] = set()
-        self.processes: dict[str, subprocess.Popen[str]] = {}
+        self.active_sessions: dict[str, str] = {}
         self.cancel_requested: set[str] = set()
+        self.timing_out: set[str] = set()
+        self.turns_by_run: dict[str, str] = {}
+        self.runs_by_turn: dict[str, str] = {}
+        self.generation_by_run: dict[str, int] = {}
+        self.done_events: dict[str, threading.Event] = {}
         self.lock = threading.Lock()
+        self._client_lock = threading.Lock()
+        self._listener_installed = False
+        self._client_generation = 0
+
+    def _get_client(self) -> AppServerClient:
+        return self._get_client_with_generation()[0]
+
+    def _get_client_with_generation(self) -> tuple[AppServerClient, int]:
+        with self._client_lock:
+            with self.lock:
+                current = self.client
+                listener_installed = self._listener_installed
+            if current is not None and not getattr(current, "closed", False):
+                if not listener_installed:
+                    with self.lock:
+                        self._client_generation += 1
+                        generation = self._client_generation
+                        self._listener_installed = True
+                    current.add_listener(
+                        lambda method, params, generation=generation: self._on_notification(
+                            generation, method, params
+                        )
+                    )
+                with self.lock:
+                    generation = self._client_generation
+                return current, generation
+            replacement = self.client_factory()
+            with self.lock:
+                previous = self.client
+                self._client_generation += 1
+                generation = self._client_generation
+                self.client = replacement
+                self._listener_installed = True
+            replacement.add_listener(
+                lambda method, params, generation=generation: self._on_notification(generation, method, params)
+            )
+            if previous is not None:
+                previous.close()
+            return replacement, generation
+
+    def close(self) -> None:
+        with self._client_lock:
+            with self.lock:
+                client = self.client
+                self.client = None
+                self._listener_installed = False
+                self._client_generation += 1
+            if client is not None:
+                client.close()
 
     def start(self, session: SessionInfo, prompt: str, image_paths: list[Path] | None = None) -> RunInfo:
         return self._start(session, prompt, image_paths, is_new=False)
@@ -355,7 +705,8 @@ class RunManager:
             )
             self.runs[run.id] = run
             self.latest_by_session[session.id] = run.id
-            self.active_sessions.add(session.id)
+            self.active_sessions[session.id] = run.id
+            self.done_events[run.id] = threading.Event()
         threading.Thread(target=self._execute, args=(run, session, images, is_new), daemon=True).start()
         return run
 
@@ -377,120 +728,237 @@ class RunManager:
                 raise RuntimeError("This run has already finished.")
             run.status = "cancelling"
             self.cancel_requested.add(run_id)
-            process = self.processes.get(run_id)
-        if process:
-            self._terminate_process(process)
-        return run
-
-    @staticmethod
-    def _terminate_process(process: subprocess.Popen[str]) -> None:
-        if process.poll() is not None:
-            return
-        if os.name == "nt":
-            taskkill = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "taskkill.exe"
+            turn_id = self.turns_by_run.get(run_id)
+            session_id = run.session_id
+        if turn_id:
             try:
-                subprocess.run(
-                    [str(taskkill), "/PID", str(process.pid), "/T", "/F"],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    creationflags=subprocess.CREATE_NO_WINDOW,
-                    timeout=5,
-                    check=False,
-                )
-                process.wait(timeout=2)
-            except (OSError, subprocess.TimeoutExpired):
-                process.kill()
-            return
-        process.terminate()
-
-    def _command(
-        self,
-        session_id: str,
-        image_paths: list[Path] | None = None,
-        is_new: bool = False,
-    ) -> list[str]:
-        image_args = [part for path in (image_paths or []) for part in ("--image", str(path))]
-        if is_new:
-            base = [self.codex_command, "exec", "--skip-git-repo-check", *image_args, "-"]
-        else:
-            base = [self.codex_command, "exec", "resume", "--skip-git-repo-check", *image_args, session_id, "-"]
-        if os.name != "nt" or Path(self.codex_command).suffix.lower() == ".exe":
-            return base
-        command_path = shutil.which(self.codex_command + ".cmd") or shutil.which(self.codex_command)
-        if command_path and Path(command_path).suffix.lower() == ".cmd":
-            comspec = os.environ.get("COMSPEC", r"C:\Windows\System32\cmd.exe")
-            return [comspec, "/d", "/s", "/c", command_path, *base[1:]]
-        return base
+                self._get_client().request("turn/interrupt", {"threadId": session_id, "turnId": turn_id})
+            except Exception as exc:
+                with self.lock:
+                    run.output = f"Could not interrupt the Codex Desktop turn: {exc}"
+                    run.status = "failed"
+                    run.finished_at = time.time()
+                    self.done_events[run_id].set()
+        return run
 
     def _execute(self, run: RunInfo, session: SessionInfo, image_paths: list[Path], is_new: bool) -> None:
         run.status = "running"
-        command = self._command(session.id, image_paths, is_new)
         try:
             with self.lock:
                 cancelled_before_start = run.id in self.cancel_requested
             if cancelled_before_start:
                 run.status = "cancelled"
                 return
-            creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
-            if os.name == "nt":
-                creationflags |= subprocess.CREATE_NEW_PROCESS_GROUP
-            process = subprocess.Popen(
-                command,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                cwd=session.cwd if session.cwd and Path(session.cwd).is_dir() else None,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                stdin=subprocess.PIPE,
-                creationflags=creationflags,
-            )
+            client, generation = self._get_client_with_generation()
             with self.lock:
-                self.processes[run.id] = process
+                self.generation_by_run[run.id] = generation
+            if is_new:
+                thread_result = client.request(
+                    "thread/start",
+                    {
+                        "cwd": session.cwd,
+                        "model": None,
+                        "modelProvider": None,
+                        "approvalPolicy": None,
+                        "sandbox": None,
+                        "config": {},
+                        "personality": None,
+                        "ephemeral": False,
+                        "threadSource": "user",
+                        "experimentalRawEvents": False,
+                    },
+                )
+                thread_id = self._result_id(thread_result, "thread")
+                if not thread_id:
+                    raise RuntimeError("Codex Desktop did not return a thread id.")
+                with self.lock:
+                    if self.active_sessions.get(session.id) != run.id:
+                        raise RuntimeError("PocketCodex lost ownership of the pending desktop task.")
+                    owner = self.active_sessions.get(thread_id)
+                    if owner is not None and owner != run.id:
+                        raise RuntimeError("This desktop thread is already running.")
+                    self.active_sessions.pop(session.id, None)
+                    self.active_sessions[thread_id] = run.id
+                    self.latest_by_session.pop(session.id, None)
+                    self.latest_by_session[thread_id] = run.id
+                    run.session_id = thread_id
+            else:
+                client.request(
+                    "thread/resume",
+                    {
+                        "threadId": session.id,
+                        "history": None,
+                        "path": None,
+                        "model": None,
+                        "modelProvider": None,
+                        "cwd": session.cwd or None,
+                        "approvalPolicy": None,
+                        "sandbox": None,
+                        "config": None,
+                        "developerInstructions": None,
+                        "personality": None,
+                        "excludeTurns": True,
+                    },
+                )
+                thread_id = session.id
+
+            inputs: list[dict[str, Any]] = [{"type": "text", "text": run.prompt, "text_elements": []}]
+            inputs.extend({"type": "localImage", "path": str(path.resolve())} for path in image_paths)
+            turn_result = client.request(
+                "turn/start",
+                {
+                    "threadId": thread_id,
+                    "clientUserMessageId": str(uuid.uuid4()),
+                    "input": inputs,
+                    "cwd": session.cwd or None,
+                    "model": None,
+                    "effort": None,
+                    "serviceTier": None,
+                    "collaborationMode": None,
+                },
+            )
+            turn_id = self._result_id(turn_result, "turn")
+            if not turn_id:
+                raise RuntimeError("Codex Desktop did not return a turn id.")
+            with self.lock:
+                self.turns_by_run[run.id] = turn_id
+                self.runs_by_turn[turn_id] = run.id
                 should_cancel = run.id in self.cancel_requested
             if should_cancel:
-                self._terminate_process(process)
-            output, _ = process.communicate(input=run.prompt, timeout=60 * 60 * 6)
-            run.exit_code = process.returncode
-            run.output = (output or "")[-30_000:]
-            if is_new:
-                match = re.search(r"session id:\s*" + SESSION_ID_RE.pattern, output or "", re.IGNORECASE)
-                if match:
-                    actual_session_id = match.group(1)
-                    run.session_id = actual_session_id
-                    with self.lock:
-                        self.latest_by_session[actual_session_id] = run.id
-                elif process.returncode == 0:
-                    run.output += "\nCould not determine the new session id."
-                    process.returncode = 1
+                client.request("turn/interrupt", {"threadId": thread_id, "turnId": turn_id})
+            done_event = self.done_events[run.id]
+            if not done_event.wait(self.turn_timeout):
+                with self.lock:
+                    timed_out = not done_event.is_set()
+                    if timed_out:
+                        self.timing_out.add(run.id)
+                if timed_out:
+                    try:
+                        client.request("turn/interrupt", {"threadId": thread_id, "turnId": turn_id})
+                        if not done_event.wait(self.interrupt_grace):
+                            client.close()
+                    except Exception as exc:
+                        client.close()
+                        run.output = (run.output + f"\nCould not interrupt timed-out turn: {exc}").strip()
+                    run.status = "failed"
                     run.exit_code = 1
-            with self.lock:
-                was_cancelled = run.id in self.cancel_requested
-            run.status = "cancelled" if was_cancelled else ("completed" if process.returncode == 0 else "failed")
-        except subprocess.TimeoutExpired as exc:
-            process = self.processes.get(run.id)
-            if process:
-                self._terminate_process(process)
-            run.status = "failed"
-            run.output = f"Timed out after 6 hours.\n{exc.stdout or ''}"
+                    run.output = (run.output + "\nTimed out after 6 hours.").strip()
         except Exception as exc:  # Keep the server alive and expose a useful error.
             run.status = "failed"
+            run.exit_code = 1
             run.output = str(exc)
         finally:
             for path in image_paths:
                 path.unlink(missing_ok=True)
-            run.finished_at = time.time()
+            if run.finished_at is None:
+                run.finished_at = time.time()
             with self.lock:
-                self.active_sessions.discard(session.id)
-                self.processes.pop(run.id, None)
+                for thread_id in {session.id, run.session_id}:
+                    if self.active_sessions.get(thread_id) == run.id:
+                        self.active_sessions.pop(thread_id, None)
                 self.cancel_requested.discard(run.id)
+                self.timing_out.discard(run.id)
+                self.generation_by_run.pop(run.id, None)
+                turn_id = self.turns_by_run.pop(run.id, None)
+                if turn_id:
+                    self.runs_by_turn.pop(turn_id, None)
+                self.done_events.pop(run.id, None)
+
+    @staticmethod
+    def _result_id(result: Any, key: str) -> str:
+        if not isinstance(result, dict):
+            return ""
+        nested = result.get(key)
+        if isinstance(nested, dict) and isinstance(nested.get("id"), str):
+            return nested["id"]
+        value = result.get(f"{key}Id") or result.get("id")
+        return value if isinstance(value, str) else ""
+
+    def _on_notification(self, generation: int, method: str, params: dict[str, Any]) -> None:
+        if method == "app-server/closed":
+            message = str(params.get("error") or "Codex Desktop app-server closed unexpectedly.")
+            with self.lock:
+                runs = [
+                    self.runs[run_id]
+                    for run_id in self.done_events
+                    if run_id in self.runs
+                    and self.generation_by_run.get(run_id) == generation
+                    and self.runs[run_id].status in {"queued", "running", "cancelling"}
+                ]
+                events = [self.done_events[run.id] for run in runs]
+                for run in runs:
+                    run.status = "failed"
+                    run.exit_code = 1
+                    run.output = message[-30_000:]
+                    run.finished_at = time.time()
+            for event in events:
+                event.set()
+            return
+
+        turn = params.get("turn") if isinstance(params.get("turn"), dict) else {}
+        turn_id = params.get("turnId") or turn.get("id")
+        if not isinstance(turn_id, str):
+            return
+        with self.lock:
+            run_id = self.runs_by_turn.get(turn_id)
+            if not run_id:
+                thread_id = params.get("threadId")
+                if isinstance(thread_id, str):
+                    candidate_id = self.latest_by_session.get(thread_id)
+                    candidate = self.runs.get(candidate_id) if candidate_id else None
+                    if (
+                        candidate
+                        and self.generation_by_run.get(candidate_id) == generation
+                        and candidate.status in {"queued", "running", "cancelling"}
+                    ):
+                        run_id = candidate_id
+                        self.turns_by_run[candidate_id] = turn_id
+                        self.runs_by_turn[turn_id] = candidate_id
+            run = self.runs.get(run_id) if run_id else None
+            if not run or self.generation_by_run.get(run.id) != generation:
+                return
+
+            item = params.get("item") if isinstance(params.get("item"), dict) else {}
+            if item.get("type") == "agentMessage":
+                text = item.get("text") or item.get("message") or ""
+                if isinstance(text, str) and text:
+                    run.output = text[-30_000:]
+            elif method in {"item/agentMessage/delta", "agentMessage/delta"}:
+                delta = params.get("delta")
+                if isinstance(delta, str):
+                    run.output = (run.output + delta)[-30_000:]
+
+            event = None
+            if method == "turn/completed":
+                if run.id in self.timing_out:
+                    event = self.done_events.get(run.id)
+                else:
+                    status = str(turn.get("status") or params.get("status") or "completed").lower()
+                    cancelled = run.id in self.cancel_requested
+                    if cancelled or status in {"interrupted", "cancelled", "canceled"}:
+                        run.status = "cancelled"
+                        run.exit_code = None
+                    elif status in {"completed", "success", "succeeded"}:
+                        run.status = "completed"
+                        run.exit_code = 0
+                    else:
+                        run.status = "failed"
+                        run.exit_code = 1
+                        error = turn.get("error") or params.get("error")
+                        if error:
+                            detail = error.get("message", str(error)) if isinstance(error, dict) else str(error)
+                            run.output = (run.output + ("\n" if run.output else "") + detail)[-30_000:]
+                    run.finished_at = time.time()
+                    event = self.done_events.get(run.id)
+        if event:
+            event.set()
 
 
 class RemoteCodexApp:
     def __init__(
         self,
         token: str,
-        session_store: SessionStore,
+        session_store: SessionStore | DesktopSessionStore,
         run_manager: RunManager,
         folder_browser: FolderBrowser | None = None,
     ) -> None:
@@ -525,12 +993,15 @@ def make_handler(app: RemoteCodexApp) -> type[BaseHTTPRequestHandler]:
             if not app.authorized(self):
                 return self._json({"error": "Unauthorized"}, HTTPStatus.UNAUTHORIZED)
             if parsed.path == "/api/sessions":
-                sessions = []
-                for item in app.session_store.list():
-                    value = asdict(item)
-                    latest_run = app.run_manager.latest(item.id)
-                    value["run"] = asdict(latest_run) if latest_run else None
-                    sessions.append(value)
+                try:
+                    sessions = []
+                    for item in app.session_store.list():
+                        value = asdict(item)
+                        latest_run = app.run_manager.latest(item.id)
+                        value["run"] = asdict(latest_run) if latest_run else None
+                        sessions.append(value)
+                except (OSError, RuntimeError, TimeoutError) as exc:
+                    return self._json({"error": str(exc)}, HTTPStatus.SERVICE_UNAVAILABLE)
                 return self._json({"sessions": sessions})
             if parsed.path == "/api/folders":
                 value = parse_qs(parsed.query).get("path", [""])[0]
@@ -583,7 +1054,10 @@ def make_handler(app: RemoteCodexApp) -> type[BaseHTTPRequestHandler]:
                 return self._json(asdict(run), HTTPStatus.ACCEPTED)
             if not SESSION_ID_RE.fullmatch(session_id):
                 return self._json({"error": "Invalid session id."}, HTTPStatus.BAD_REQUEST)
-            session = app.session_store.get(session_id)
+            try:
+                session = app.session_store.get(session_id)
+            except (OSError, RuntimeError, TimeoutError) as exc:
+                return self._json({"error": str(exc)}, HTTPStatus.SERVICE_UNAVAILABLE)
             if not session:
                 return self._json({"error": "Session not found."}, HTTPStatus.NOT_FOUND)
             try:
@@ -636,22 +1110,23 @@ def make_handler(app: RemoteCodexApp) -> type[BaseHTTPRequestHandler]:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Private mobile control page for Codex sessions")
+    parser = argparse.ArgumentParser(description="Private mobile control page for Codex Desktop sessions")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--env", type=Path, default=DEFAULT_ENV)
-    parser.add_argument("--sessions", type=Path, default=Path.home() / ".codex" / "sessions")
-    parser.add_argument("--codex-command", default="codex")
+    parser.add_argument("--desktop-exe", type=Path, help="Path to the codex.exe bundled with Codex Desktop")
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
     token = ensure_token(args.env)
+    client_factory = lambda: AppServerClient(args.desktop_exe or locate_codex_desktop_executable())
+    run_manager = RunManager(client_factory=client_factory)
     app = RemoteCodexApp(
         token,
-        SessionStore(args.sessions),
-        RunManager(args.codex_command),
+        DesktopSessionStore(run_manager._get_client),
+        run_manager,
         FolderBrowser(default_folder_roots()),
     )
     server = ThreadingHTTPServer((args.host, args.port), make_handler(app))
@@ -662,6 +1137,7 @@ def main() -> int:
     except KeyboardInterrupt:
         pass
     finally:
+        run_manager.close()
         server.server_close()
     return 0
 
