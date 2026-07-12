@@ -2,31 +2,35 @@
 
 The complete setup guide now lives in [README.md](./README.md) and [README.en.md](./README.en.md).
 
-## Recommended connection
+## Default connection for mainland-China users
 
-Keep the Python server bound to loopback and publish it only inside your private Tailscale network:
+Keep the Python server bound to loopback and start a Cloudflare Quick Tunnel from a second PowerShell:
 
 ```powershell
 python .\remote_codex_server.py
+cloudflared tunnel --url http://127.0.0.1:8765
+```
+
+Open the generated HTTPS URL on the phone and append the token from `remote.env` on first use:
+
+```text
+https://random-name.trycloudflare.com/#token=YOUR_REMOTE_CODEX_TOKEN
+```
+
+The phone must be able to reach `trycloudflare.com`. Some mainland-China users rely on an already-installed proxy client such as Shadowrocket. PocketCodex does not provide or configure proxy services.
+
+Quick Tunnel is a public endpoint. Keep the token private and stop cloudflared when it is not needed.
+
+## Tailscale alternative
+
+Tailscale remains available as a private-network option for users who can install it on both devices:
+
+```powershell
 tailscale serve --bg http://127.0.0.1:8765
 tailscale serve status
 ```
 
-Open the reported HTTPS URL on the phone and append the token from `remote.env` on first use:
-
-```text
-https://your-device.your-tailnet.ts.net/#token=YOUR_REMOTE_CODEX_TOKEN
-```
-
-## Temporary Quick Tunnel
-
-When Tailscale is unavailable:
-
-```powershell
-cloudflared tunnel --url http://127.0.0.1:8765
-```
-
-Append `#token=...` to the generated `trycloudflare.com` URL. Quick Tunnel is a public endpoint and should be used only temporarily.
+Append `#token=...` to the reported tailnet URL. Tailscale adds device identity and ACLs but is not required for the default PocketCodex setup.
 
 ## What the remote service controls
 

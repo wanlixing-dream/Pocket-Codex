@@ -34,8 +34,8 @@
 ```mermaid
 flowchart LR
     Phone[手机浏览器] -->|HTTPS| Access{远程访问层}
-    Access -->|推荐| TS[Tailscale Serve]
-    Access -->|临时方案| CF[Cloudflare Quick Tunnel]
+    Access -->|国内用户默认| CF[Cloudflare Quick Tunnel]
+    Access -->|私有网络备选| TS[Tailscale Serve]
     TS --> Server[PocketCodex 本地服务<br/>127.0.0.1:8765]
     CF --> Server
     Server --> Sessions[读取 ~/.codex/sessions]
@@ -58,14 +58,14 @@ flowchart LR
 - 已安装并登录的 [Codex CLI](https://developers.openai.com/codex/cli)。
 - 至少已有一个 Codex session，或者准备一个用于新建 session 的项目文件夹。
 - 以下远程访问工具任选一个：
-  - 推荐：[Tailscale](https://tailscale.com/download)
-  - 临时使用：[cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)
+  - 默认上手：[cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)
+  - 私有网络备选：[Tailscale](https://tailscale.com/download)
 
 ### 手机
 
 - Safari、Chrome 或其他现代浏览器。
-- 使用 Tailscale 时，手机也需要安装 Tailscale 并登录同一账号。
-- 使用 Cloudflare Quick Tunnel 时，无需安装额外应用，但链接实际暴露在公网，必须保护访问令牌。
+- 使用 Cloudflare Quick Tunnel 时，手机需要能够访问生成的 `trycloudflare.com` 地址。部分国内 iPhone 用户会使用已经安装的小火箭（Shadowrocket）等代理工具；PocketCodex 本身不提供代理服务。
+- 使用 Tailscale 备选方案时，手机也需要安装 Tailscale 并登录同一账号。
 
 PocketCodex 的 Python 服务只使用标准库，不需要运行 `pip install`。
 
@@ -106,9 +106,32 @@ http://127.0.0.1:8765
 
 ### 4. 让手机连接电脑
 
-推荐使用下面的 Tailscale 方式；只有无法使用 Tailscale 时再考虑 Quick Tunnel。
+面向国内用户，默认使用 Cloudflare Quick Tunnel。它不要求手机安装 Tailscale；如果当前网络无法直接访问生成的地址，请使用你已有且符合当地规定的网络环境。
 
-#### 方案 A：Tailscale Serve（推荐）
+#### 方案 A：Cloudflare Quick Tunnel（默认）
+
+1. 在电脑安装 `cloudflared`。
+2. 保持 PocketCodex 服务运行，另开一个 PowerShell。
+3. 执行：
+
+```powershell
+cloudflared tunnel --url http://127.0.0.1:8765
+```
+
+4. cloudflared 会显示一个临时 `https://*.trycloudflare.com` 地址。
+5. 在该地址末尾添加首次启动时生成的令牌：
+
+```text
+https://随机地址.trycloudflare.com/#token=你的_REMOTE_CODEX_TOKEN
+```
+
+6. 用手机打开该地址。页面会把令牌保存在当前浏览器中，并从地址栏移除令牌片段。
+
+Quick Tunnel 地址通常会在 cloudflared 重启后改变。该地址可从公网访问，访问令牌是主要的应用层防线，不要把完整链接发到群聊、Issue 或截图中。
+
+#### 方案 B：Tailscale Serve（私有网络备选）
+
+Tailscale 的设备身份和 tailnet ACL 提供了额外隔离，适合已经能够安装 Tailscale、并希望长期使用固定私有地址的用户：
 
 1. 在电脑和手机安装 Tailscale，并登录同一账号。
 2. 保持 PocketCodex 服务运行。
@@ -119,36 +142,17 @@ tailscale serve --bg http://127.0.0.1:8765
 tailscale serve status
 ```
 
-4. 复制 `tailscale serve status` 显示的 HTTPS 地址。
-5. 在地址末尾添加首次启动时生成的令牌：
+4. 复制状态中显示的 HTTPS 地址，并在首次访问时添加令牌：
 
 ```text
 https://your-device.your-tailnet.ts.net/#token=你的_REMOTE_CODEX_TOKEN
 ```
 
-6. 用手机打开该地址。页面会把令牌保存在当前浏览器中，并从地址栏移除令牌片段。
-
-停止共享：
+停止 Tailscale 共享：
 
 ```powershell
 tailscale serve reset
 ```
-
-#### 方案 B：Cloudflare Quick Tunnel（临时方案）
-
-保持 PocketCodex 服务运行，另开一个 PowerShell：
-
-```powershell
-cloudflared tunnel --url http://127.0.0.1:8765
-```
-
-cloudflared 会显示一个临时 `https://*.trycloudflare.com` 地址。用以下格式在手机打开：
-
-```text
-https://随机地址.trycloudflare.com/#token=你的_REMOTE_CODEX_TOKEN
-```
-
-Quick Tunnel 地址可能在重启后改变。它是公网地址，不提供 Tailscale 的设备级私有网络隔离，只适合短期使用。
 
 ### 5. 从手机开始工作
 
@@ -206,14 +210,15 @@ REMOTE_CODEX_ROOTS=C:\Users\you\Desktop;D:\Projects
 PocketCodex 可以在你的电脑上启动 Codex 并访问允许的项目目录，应把它视为远程管理入口：
 
 - 服务默认绑定 `127.0.0.1`；不要直接改成 `0.0.0.0` 暴露到局域网或公网。
-- 优先使用 Tailscale，并限制 tailnet 中可访问该设备的成员。
+- 默认 Quick Tunnel 是公网入口；令牌等同密码，完整访问链接只能自己保存。
+- 能够使用 Tailscale 时，可用其设备身份和 ACL 增加一层私有网络隔离。
 - 不要公开分享带 `#token=` 或 `?token=` 的链接。
 - 如果链接或令牌可能泄漏，停止服务，删除 `remote.env` 后重新启动以生成新令牌。
 - 仅把 `REMOTE_CODEX_ROOTS` 指向确实需要远程工作的目录。
 - `REMOTE_CODEX_ROOTS` 只限制新建 session 的文件夹选择器，不能限制已有 session 或 Codex 后续能够访问的路径。
 - PocketCodex 只允许继续本机记录中存在的 session，但发送给 Codex 的指令仍可能修改项目文件或运行命令。
 - 远程任务使用非交互 `codex exec`；不能依赖交互式 `PermissionRequest` hook 为远程任务兜底。
-- Cloudflare Quick Tunnel 是临时公网入口，不建议长期无人值守运行。
+- Cloudflare Quick Tunnel 不建议在无人看管时长期运行；不用时应停止 cloudflared 和 PocketCodex 服务。
 
 更多威胁边界见 [架构说明：安全边界](./docs/ARCHITECTURE.md#安全边界)。
 

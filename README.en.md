@@ -34,8 +34,8 @@ Codex, its sessions, and your project files remain on your desktop. The phone is
 ```mermaid
 flowchart LR
     Phone[Phone browser] -->|HTTPS| Access{Access layer}
-    Access -->|Recommended| TS[Tailscale Serve]
-    Access -->|Temporary alternative| CF[Cloudflare Quick Tunnel]
+    Access -->|Default for mainland China| CF[Cloudflare Quick Tunnel]
+    Access -->|Private-network alternative| TS[Tailscale Serve]
     TS --> Server[PocketCodex server<br/>127.0.0.1:8765]
     CF --> Server
     Server --> Sessions[Read ~/.codex/sessions]
@@ -57,13 +57,14 @@ See [Architecture](./docs/ARCHITECTURE.md) for component boundaries, request flo
 - Python 3.10 or newer.
 - [Codex CLI](https://developers.openai.com/codex/cli) installed, available on `PATH`, and signed in.
 - One remote access option:
-  - Recommended: [Tailscale](https://tailscale.com/download)
-  - Temporary alternative: [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)
+  - Default setup: [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)
+  - Private-network alternative: [Tailscale](https://tailscale.com/download)
 
 ### Phone
 
 - Safari, Chrome, or another modern browser.
-- Tailscale installed and signed in to the same tailnet when using the recommended setup.
+- The phone must be able to reach the generated `trycloudflare.com` URL. Some mainland-China iPhone users use an already-installed proxy client such as Shadowrocket; PocketCodex does not provide a proxy service.
+- Tailscale installed and signed in to the same tailnet only when using the alternative setup.
 
 The Python server uses only the standard library. There is no `pip install` step.
 
@@ -91,44 +92,38 @@ The server listens only on `http://127.0.0.1:8765` by default. On first start it
 > [!WARNING]
 > Never commit, screenshot, or publicly share `remote.env`. Anyone with its token may be able to send instructions to your local Codex sessions.
 
-### 3. Connect with Tailscale Serve (recommended)
+### 3. Connect with Cloudflare Quick Tunnel (default)
 
-Install Tailscale on the desktop and phone, sign both into the same account, keep PocketCodex running, then run:
+Install `cloudflared`, keep PocketCodex running, and start a second PowerShell:
+
+```powershell
+cloudflared tunnel --url http://127.0.0.1:8765
+```
+
+Open the generated URL on the phone and append the token once:
+
+```text
+https://random-name.trycloudflare.com/#token=YOUR_REMOTE_CODEX_TOKEN
+```
+
+The web client stores the token in that browser and removes the fragment from the address bar. Quick Tunnel URLs are public and normally change after cloudflared restarts, so never share the complete URL in chats, issues, or screenshots.
+
+### 4. Tailscale Serve (private-network alternative)
+
+Tailscale adds device identity and tailnet ACLs. Use it when it is available and you prefer a stable private address:
 
 ```powershell
 tailscale serve --bg http://127.0.0.1:8765
 tailscale serve status
 ```
 
-Open the HTTPS URL from `tailscale serve status` on the phone and append the token once:
+Open the reported HTTPS URL and append the token on first use:
 
 ```text
 https://your-device.your-tailnet.ts.net/#token=YOUR_REMOTE_CODEX_TOKEN
 ```
 
-The web client stores the token in that browser and removes the fragment from the address bar.
-
-Stop sharing with:
-
-```powershell
-tailscale serve reset
-```
-
-### 4. Cloudflare Quick Tunnel (temporary alternative)
-
-Keep PocketCodex running and start a second PowerShell:
-
-```powershell
-cloudflared tunnel --url http://127.0.0.1:8765
-```
-
-Open the generated URL on the phone using this format:
-
-```text
-https://random-name.trycloudflare.com/#token=YOUR_REMOTE_CODEX_TOKEN
-```
-
-Quick Tunnel URLs are public and normally change after restart. The token is the main application-level access control, so this option is intended for temporary use.
+Stop sharing with `tailscale serve reset`.
 
 ### 5. Use the mobile client
 
@@ -186,13 +181,14 @@ PocketCodex remote runs use non-interactive `codex exec`; do not treat watch app
 PocketCodex can start Codex on your machine and should be treated as a remote administration endpoint:
 
 - Keep the server bound to `127.0.0.1`; do not expose `0.0.0.0` directly.
-- Prefer Tailscale and restrict who can reach the desktop in your tailnet.
+- The default Quick Tunnel is a public endpoint. Treat the complete tokenized URL as a password.
+- When Tailscale is available, its device identity and ACLs provide an additional private-network layer.
 - Do not share URLs containing `#token=` or `?token=`.
 - Rotate the token and reset the tunnel if a URL or token may have leaked.
 - Allow only project roots that you genuinely need remotely.
 - `REMOTE_CODEX_ROOTS` limits the new-session picker only. Codex permissions are still governed by its sandbox, approval policy, and the desktop user account.
 - A valid client can read recent prompt/response metadata and send new instructions.
-- Cloudflare Quick Tunnel is a temporary public endpoint, not a private network.
+- Stop cloudflared and PocketCodex when they are not in use; Quick Tunnel is not a private network.
 
 ## Current limitations
 

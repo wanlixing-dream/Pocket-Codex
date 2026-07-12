@@ -15,8 +15,8 @@ flowchart TB
     end
 
     subgraph Network[远程访问层]
-        Tailscale[Tailscale Serve<br/>推荐：私有 tailnet]
-        Cloudflare[Cloudflare Quick Tunnel<br/>可选：临时公网 URL]
+        Cloudflare[Cloudflare Quick Tunnel<br/>国内用户默认入口]
+        Tailscale[Tailscale Serve<br/>私有网络备选]
     end
 
     subgraph Desktop[桌面电脑]
@@ -155,23 +155,25 @@ sequenceDiagram
 
 ## 4. 网络模型
 
+### Cloudflare Quick Tunnel
+
+面向国内用户的默认上手路径：
+
+- cloudflared 从本机主动建立到 Cloudflare 的出站连接。
+- 手机不需要安装 Tailscale，但必须能够访问生成的 `trycloudflare.com` 地址。
+- 部分国内 iPhone 用户会通过已经安装的小火箭（Shadowrocket）等代理工具访问；这些网络工具不属于 PocketCodex。
+- 随机 URL 可从公网访问，PocketCodex 令牌成为主要应用层防线。
+- URL 重启后通常改变，不适合作为固定服务地址。
+- 当前方案没有 Cloudflare Access 身份策略，不应视为私有网络。
+
 ### Tailscale Serve
 
-推荐用于长期和个人使用：
+无法或不便使用 Tailscale 的用户不需要安装它。已经具备 Tailscale 条件、并希望获得固定私有入口时，可以选择该方案：
 
 - PocketCodex 仍只监听 loopback。
 - Tailscale 在 tailnet 内提供 HTTPS 入口。
 - tailnet 身份和 ACL 构成令牌以外的第二层访问控制。
 - 手机和电脑都需要加入同一 tailnet。
-
-### Cloudflare Quick Tunnel
-
-适合临时使用：
-
-- cloudflared 从本机主动建立到 Cloudflare 的出站连接。
-- 随机 URL 可从公网访问，PocketCodex 令牌成为主要应用层防线。
-- URL 重启后通常改变，不适合作为稳定服务地址。
-- 当前方案没有 Cloudflare Access 身份策略，不应视为私有网络。
 
 ## 5. 安全边界
 
@@ -199,11 +201,12 @@ sequenceDiagram
 ### 部署原则
 
 1. 保持服务绑定 loopback。
-2. 优先使用 Tailscale，并配置最小范围 ACL。
+2. 使用默认 Quick Tunnel 时，把令牌和完整 URL 当作密码；不用时停止隧道。
 3. 把 `remote.env` 当作密码文件处理。
 4. 只开放必要项目根目录。
 5. 令牌疑似泄漏时立即轮换。
-6. 不在不受信任或多人共用电脑上长期运行。
+6. 能够使用 Tailscale 时，可通过最小范围 ACL 获得额外隔离。
+7. 不在不受信任或多人共用电脑上长期运行。
 
 ## 6. 可选通知链路
 
