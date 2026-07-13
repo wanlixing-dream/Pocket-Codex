@@ -38,6 +38,8 @@ MAX_PROMPT_CHARS = 20_000
 MAX_IMAGES = 4
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 MAX_REQUEST_BYTES = MAX_PROMPT_CHARS * 4 + MAX_IMAGES * (MAX_IMAGE_BYTES * 4 // 3 + 1024)
+SESSION_LIST_RESPONSE_CHARS = 1200
+SESSION_LIST_RUN_OUTPUT_CHARS = 2400
 MACOS_APP_CANDIDATES = [
     Path("/Applications/ChatGPT.app"),
     Path.home() / "Applications" / "ChatGPT.app",
@@ -421,6 +423,24 @@ class SessionInfo:
     desktop_status: dict[str, Any] = field(default_factory=lambda: {"type": "unknown"})
     desktop_activity: str = "unknown"
     desktop_activity_source: str = "unknown"
+
+
+def _truncate_payload_text(value: str, limit: int) -> str:
+    if len(value) <= limit:
+        return value
+    return value[: max(0, limit - 3)].rstrip() + "..."
+
+
+def session_list_item_payload(item: SessionInfo, latest_run: "RunInfo | None" = None) -> dict[str, Any]:
+    value = asdict(item)
+    value["last_response"] = _truncate_payload_text(value.get("last_response", ""), SESSION_LIST_RESPONSE_CHARS)
+    if latest_run:
+        run = asdict(latest_run)
+        run["output"] = _truncate_payload_text(run.get("output", ""), SESSION_LIST_RUN_OUTPUT_CHARS)
+        value["run"] = run
+    else:
+        value["run"] = None
+    return value
 
 
 class SessionStore:
@@ -1091,10 +1111,8 @@ def make_handler(app: RemoteCodexApp) -> type[BaseHTTPRequestHandler]:
                 try:
                     sessions = []
                     for item in app.session_store.list():
-                        value = asdict(item)
                         latest_run = app.run_manager.latest(item.id)
-                        value["run"] = asdict(latest_run) if latest_run else None
-                        sessions.append(value)
+                        sessions.append(session_list_item_payload(item, latest_run))
                 except (OSError, RuntimeError, TimeoutError) as exc:
                     return self._json({"error": str(exc)}, HTTPStatus.SERVICE_UNAVAILABLE)
                 return self._json({"sessions": sessions})

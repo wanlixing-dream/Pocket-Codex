@@ -7,11 +7,11 @@ import start_remote_codex as starter
 
 class StartRemoteCodexTests(unittest.TestCase):
     def test_extracts_quick_tunnel_url_from_cloudflared_output(self):
-        text = "Visit it at https://perspective-copyrighted-deal-maple.trycloudflare.com"
+        text = "Visit it at https://example-quick-tunnel-name.trycloudflare.com"
 
         self.assertEqual(
             starter.extract_quick_tunnel_url(text),
-            "https://perspective-copyrighted-deal-maple.trycloudflare.com",
+            "https://example-quick-tunnel-name.trycloudflare.com",
         )
 
     def test_builds_mobile_url_with_token_fragment(self):

@@ -663,5 +663,27 @@ class HttpAuthTests(unittest.TestCase):
         self.assertEqual(data["folders"][0]["path"], str(Path(self.temp.name).resolve()))
 
 
+    def test_session_list_truncates_large_text_fields(self):
+        long_response = "response " * 1000
+        long_output = "output " * 1000
+        session = remote.SessionInfo(
+            "12345678-1234-1234-1234-123456789abc",
+            str(Path(self.temp.name)),
+            "demo",
+            0,
+            "now",
+            "title",
+            "last",
+            long_response,
+        )
+        run = remote.RunInfo("run-1", session.id, "prompt", status="completed", output=long_output)
+        payload = remote.session_list_item_payload(session, run)
+
+        self.assertLess(len(payload["last_response"]), len(long_response))
+        self.assertTrue(payload["last_response"].endswith("..."))
+        self.assertLess(len(payload["run"]["output"]), len(long_output))
+        self.assertTrue(payload["run"]["output"].endswith("..."))
+
+
 if __name__ == "__main__":
     unittest.main()
