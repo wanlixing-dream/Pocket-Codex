@@ -129,6 +129,56 @@ class DesktopSessionStoreTests(unittest.TestCase):
 
         self.assertEqual(session.desktop_activity, "idle")
 
+    def test_idle_desktop_status_is_idle(self):
+        thread_id = "12345678-1234-1234-1234-123456789abc"
+
+        class Client:
+            def request(self, method, params):
+                return {
+                    "data": [
+                        {
+                            "id": thread_id,
+                            "cwd": "C:\\work\\desktop-project",
+                            "name": "Desktop task",
+                            "updatedAt": 1_700_000_000,
+                            "status": {"type": "idle"},
+                        }
+                    ]
+                }
+
+        session = remote.DesktopSessionStore(lambda: Client()).list()[0]
+
+        self.assertEqual(session.desktop_activity, "idle")
+
+    def test_idle_desktop_status_overrides_stale_active_session_log(self):
+        thread_id = "12345678-1234-1234-1234-123456789abc"
+        with tempfile.TemporaryDirectory() as temp:
+            log_path = Path(temp) / f"rollout-{thread_id}.jsonl"
+            log_path.write_text(
+                json.dumps({"type": "event_msg", "payload": {"type": "task_started", "turn_id": "stale-turn"}}),
+                encoding="utf-8",
+            )
+
+            class Client:
+                def request(self, method, params):
+                    return {
+                        "data": [
+                            {
+                                "id": thread_id,
+                                "cwd": "C:\\work\\desktop-project",
+                                "name": "Desktop task",
+                                "updatedAt": 1_700_000_000,
+                                "status": {"type": "idle"},
+                                "path": str(log_path),
+                            }
+                        ]
+                    }
+
+            session = remote.DesktopSessionStore(lambda: Client()).list()[0]
+
+        self.assertEqual(session.desktop_activity, "idle")
+        self.assertEqual(session.desktop_activity_source, "app_server")
+
     def test_unfinished_session_log_marks_desktop_thread_active(self):
         thread_id = "12345678-1234-1234-1234-123456789abc"
         with tempfile.TemporaryDirectory() as temp:
@@ -322,19 +372,24 @@ class DesktopExecutableTests(unittest.TestCase):
                 os.environ.pop("REMOTE_CODEX_DESKTOP_EXE", None)
                 self.assertEqual(remote.locate_codex_desktop_executable(), app_server.resolve())
 
-    def test_macos_fallback_selects_chatgpt_app_resource_codex(self):
+    def test_macos_fallback_caches_chatgpt_app_resource_codex(self):
         with tempfile.TemporaryDirectory() as temp:
             app = Path(temp) / "ChatGPT.app"
             executable = app / "Contents" / "Resources" / "codex"
             executable.parent.mkdir(parents=True)
-            executable.write_bytes(b"")
+            executable.write_bytes(b"signed codex binary")
+            cached = Path(temp) / "cache" / "codex"
 
             with patch.object(remote, "MACOS_APP_CANDIDATES", [app], create=True), patch.dict(
                 os.environ, {"LOCALAPPDATA": ""},
                 clear=False,
-            ), patch.object(remote.sys, "platform", "darwin"):
+            ), patch.object(remote, "MACOS_EXECUTABLE_CACHE", cached), patch.object(
+                remote.sys, "platform", "darwin"
+            ):
                 os.environ.pop("REMOTE_CODEX_DESKTOP_EXE", None)
-                self.assertEqual(remote.locate_codex_desktop_executable(), executable.resolve())
+                self.assertEqual(remote.locate_codex_desktop_executable(), cached.resolve())
+
+            self.assertEqual(cached.read_bytes(), executable.read_bytes())
 
 
 class FakeAppServerClient:

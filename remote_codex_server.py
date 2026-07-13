@@ -11,6 +11,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import subprocess
 import sys
 import threading
@@ -46,6 +47,34 @@ MACOS_APP_CANDIDATES = [
     Path("/Applications/Codex.app"),
     Path.home() / "Applications" / "Codex.app",
 ]
+MACOS_EXECUTABLE_CACHE = Path.home() / "Library" / "Caches" / "PocketCodex" / "codex"
+
+
+def _cache_macos_executable(source: Path) -> Path:
+    target = MACOS_EXECUTABLE_CACHE.expanduser()
+    source_stat = source.stat()
+    try:
+        target_stat = target.stat()
+    except OSError:
+        target_stat = None
+    if target_stat and (
+        target_stat.st_size == source_stat.st_size
+        and target_stat.st_mtime_ns == source_stat.st_mtime_ns
+    ):
+        return target.resolve()
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        target.parent.chmod(0o700)
+    except OSError:
+        pass
+    temporary = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+    try:
+        shutil.copy2(source, temporary)
+        os.replace(temporary, target)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return target.resolve()
 
 
 def locate_codex_desktop_executable() -> Path:
@@ -71,7 +100,7 @@ def locate_codex_desktop_executable() -> Path:
         for app in MACOS_APP_CANDIDATES:
             app_server = app / "Contents" / "Resources" / "codex"
             if app_server.is_file():
-                return app_server.resolve()
+                return _cache_macos_executable(app_server)
 
     if sys.platform == "win32":
         powershell = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
@@ -558,10 +587,14 @@ class DesktopSessionStore:
         except (TypeError, ValueError):
             updated = time.time()
         desktop_status = thread.get("status") if isinstance(thread.get("status"), dict) else {"type": "unknown"}
+        status_type = str(desktop_status.get("type") or "").strip().lower().replace("_", "")
         app_activity = _desktop_activity(desktop_status)
         log_activity, log_response = _session_log_snapshot(thread.get("path"))
         if app_activity == "active":
             desktop_activity = "active"
+            desktop_activity_source = "app_server"
+        elif status_type == "idle":
+            desktop_activity = "idle"
             desktop_activity_source = "app_server"
         elif log_activity == "active":
             desktop_activity = "active"
@@ -634,7 +667,7 @@ def _desktop_activity(status: Any) -> str:
     status_type = str(status.get("type") or "").strip()
     if not status_type:
         return "unknown"
-    if status_type.lower().replace("_", "") == "notloaded":
+    if status_type.lower().replace("_", "") in {"idle", "notloaded"}:
         return "idle"
     return "active"
 
