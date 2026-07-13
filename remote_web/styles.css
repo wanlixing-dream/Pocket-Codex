@@ -92,6 +92,8 @@ button { -webkit-tap-highlight-color: transparent; }
 }
 
 .session.selected { border-color: var(--accent); background: var(--panel-strong); box-shadow: inset 3px 0 0 var(--accent); }
+.session.desktop-active { border-color: #e7b75f; box-shadow: inset 3px 0 0 #e7b75f; }
+.session.desktop-active .session-meta span:last-child { color: #e7b75f; font-weight: 800; }
 .session-meta { display: flex; justify-content: space-between; gap: 12px; color: var(--muted); font-size: 11px; }
 .session-project { color: var(--accent); font-weight: 700; }
 .session-title { margin-top: 8px; font-size: 14px; font-weight: 650; line-height: 1.35; }

@@ -84,6 +84,82 @@ class DesktopSessionStoreTests(unittest.TestCase):
         self.assertEqual(sessions[0].project, "desktop-project")
         self.assertEqual(sessions[0].title, "Desktop task")
 
+    def test_exposes_desktop_thread_status_for_external_runs(self):
+        thread_id = "12345678-1234-1234-1234-123456789abc"
+        desktop_status = {"type": "running", "turnId": "turn-from-desktop"}
+
+        class Client:
+            def request(self, method, params):
+                return {
+                    "data": [
+                        {
+                            "id": thread_id,
+                            "cwd": "C:\\work\\desktop-project",
+                            "name": "Desktop task",
+                            "preview": "Run from desktop",
+                            "updatedAt": 1_700_000_000,
+                            "status": desktop_status,
+                        }
+                    ]
+                }
+
+        session = remote.DesktopSessionStore(lambda: Client()).list()[0]
+
+        self.assertEqual(session.desktop_status, desktop_status)
+        self.assertEqual(session.desktop_activity, "active")
+
+    def test_not_loaded_desktop_status_is_idle(self):
+        thread_id = "12345678-1234-1234-1234-123456789abc"
+
+        class Client:
+            def request(self, method, params):
+                return {
+                    "data": [
+                        {
+                            "id": thread_id,
+                            "cwd": "C:\\work\\desktop-project",
+                            "name": "Desktop task",
+                            "updatedAt": 1_700_000_000,
+                            "status": {"type": "notLoaded"},
+                        }
+                    ]
+                }
+
+        session = remote.DesktopSessionStore(lambda: Client()).list()[0]
+
+        self.assertEqual(session.desktop_activity, "idle")
+
+    def test_unfinished_session_log_marks_desktop_thread_active(self):
+        thread_id = "12345678-1234-1234-1234-123456789abc"
+        with tempfile.TemporaryDirectory() as temp:
+            log_path = Path(temp) / f"rollout-{thread_id}.jsonl"
+            events = [
+                {"type": "event_msg", "payload": {"type": "task_started", "turn_id": "turn-1"}},
+                {"type": "event_msg", "payload": {"type": "agent_message", "message": "桌面端正在执行"}},
+            ]
+            log_path.write_text("\n".join(json.dumps(item, ensure_ascii=False) for item in events), encoding="utf-8")
+
+            class Client:
+                def request(self, method, params):
+                    return {
+                        "data": [
+                            {
+                                "id": thread_id,
+                                "cwd": "C:\\work\\desktop-project",
+                                "name": "Desktop task",
+                                "updatedAt": 1_700_000_000,
+                                "status": {"type": "notLoaded"},
+                                "path": str(log_path),
+                            }
+                        ]
+                    }
+
+            session = remote.DesktopSessionStore(lambda: Client()).list()[0]
+
+        self.assertEqual(session.desktop_activity, "active")
+        self.assertEqual(session.desktop_activity_source, "session_log")
+        self.assertEqual(session.last_response, "桌面端正在执行")
+
 
 class ImageUploadTests(unittest.TestCase):
     def test_saves_supported_image_with_random_name(self):

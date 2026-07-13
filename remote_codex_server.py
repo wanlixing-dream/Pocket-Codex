@@ -418,6 +418,9 @@ class SessionInfo:
     title: str
     last_prompt: str
     last_response: str
+    desktop_status: dict[str, Any] = field(default_factory=lambda: {"type": "unknown"})
+    desktop_activity: str = "unknown"
+    desktop_activity_source: str = "unknown"
 
 
 class SessionStore:
@@ -534,6 +537,21 @@ class DesktopSessionStore:
             updated = float(raw_updated)
         except (TypeError, ValueError):
             updated = time.time()
+        desktop_status = thread.get("status") if isinstance(thread.get("status"), dict) else {"type": "unknown"}
+        app_activity = _desktop_activity(desktop_status)
+        log_activity, log_response = _session_log_snapshot(thread.get("path"))
+        if app_activity == "active":
+            desktop_activity = "active"
+            desktop_activity_source = "app_server"
+        elif log_activity == "active":
+            desktop_activity = "active"
+            desktop_activity_source = "session_log"
+        elif app_activity == "idle" or log_activity == "idle":
+            desktop_activity = "idle"
+            desktop_activity_source = "none"
+        else:
+            desktop_activity = "unknown"
+            desktop_activity_source = "unknown"
         return SessionInfo(
             id=thread_id,
             cwd=cwd,
@@ -542,8 +560,63 @@ class DesktopSessionStore:
             updated_label=datetime.fromtimestamp(updated).strftime("%m-%d %H:%M"),
             title=_shorten(title, 72),
             last_prompt=_shorten(preview or title, 140),
-            last_response="",
+            last_response=log_response,
+            desktop_status=desktop_status,
+            desktop_activity=desktop_activity,
+            desktop_activity_source=desktop_activity_source,
         )
+
+
+def _session_log_snapshot(path_value: Any) -> tuple[str, str]:
+    if not isinstance(path_value, str) or not path_value.strip():
+        return "unknown", ""
+    path = Path(path_value).expanduser()
+    if not path.is_file():
+        return "unknown", ""
+
+    active_turns: set[str] = set()
+    last_response = ""
+    terminal_events = {"task_complete", "turn_aborted", "turn_cancelled", "turn_failed"}
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                payload = event.get("payload") or {}
+                event_type = event.get("type")
+                payload_type = payload.get("type")
+                if event_type == "event_msg" and payload_type == "task_started":
+                    active_turns.add(str(payload.get("turn_id") or "__unknown__"))
+                elif event_type == "event_msg" and payload_type in terminal_events:
+                    turn_id = payload.get("turn_id")
+                    if turn_id:
+                        active_turns.discard(str(turn_id))
+                    else:
+                        active_turns.clear()
+                elif event_type == "event_msg" and payload_type == "agent_message":
+                    message = str(payload.get("message") or "").strip()
+                    if message:
+                        last_response = message
+                elif event_type == "response_item" and payload.get("role") == "assistant":
+                    text = _text_from_content(payload.get("content"))
+                    if text:
+                        last_response = text
+    except OSError:
+        return "unknown", ""
+    return ("active" if active_turns else "idle"), last_response
+
+
+def _desktop_activity(status: Any) -> str:
+    if not isinstance(status, dict):
+        return "unknown"
+    status_type = str(status.get("type") or "").strip()
+    if not status_type:
+        return "unknown"
+    if status_type.lower().replace("_", "") == "notloaded":
+        return "idle"
+    return "active"
 
 
 def default_folder_roots() -> list[Path]:

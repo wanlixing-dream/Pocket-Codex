@@ -48,14 +48,44 @@ async function loadSessions(showLoading = true) {
   }
 }
 
+function selectedSession() {
+  return state.sessions.find((item) => item.id === state.selected) || null;
+}
+
+function isOwnRunActive(run) {
+  return Boolean(run && ['queued', 'running', 'cancelling'].includes(run.status));
+}
+
+function isExternalDesktopActive(session) {
+  return Boolean(session && session.desktop_activity === 'active' && !isOwnRunActive(session.run));
+}
+
+function desktopStatusType(session) {
+  return session && session.desktop_status && session.desktop_status.type
+    ? String(session.desktop_status.type)
+    : 'unknown';
+}
+
+function desktopActivityDetail(session) {
+  if (session && session.desktop_activity_source === 'session_log') return 'session 日志仍在更新';
+  return `状态 ${desktopStatusType(session)}`;
+}
+
 function renderSessions() {
-  $('sessions').innerHTML = state.sessions.map((session) => `
-    <button class="session ${state.selected === session.id ? 'selected' : ''}" type="button"
+  $('sessions').innerHTML = state.sessions.map((session) => {
+    const externalActive = isExternalDesktopActive(session);
+    const classes = ['session', state.selected === session.id ? 'selected' : '', externalActive ? 'desktop-active' : '']
+      .filter(Boolean)
+      .join(' ');
+    const statusLabel = externalActive ? '桌面运行中' : session.updated_label;
+    return `
+    <button class="${classes}" type="button"
       role="option" aria-selected="${state.selected === session.id}" data-id="${session.id}">
-      <span class="session-meta"><span class="session-project">${escapeHtml(session.project)}</span><span>${escapeHtml(session.updated_label)}</span></span>
+      <span class="session-meta"><span class="session-project">${escapeHtml(session.project)}</span><span>${escapeHtml(statusLabel)}</span></span>
       <div class="session-title">${escapeHtml(session.title)}</div>
       <div class="session-last">${escapeHtml(session.last_prompt)}</div>
-    </button>`).join('') || '<p class="session-last">没有找到 Codex 任务</p>';
+    </button>`;
+  }).join('') || '<p class="session-last">没有找到 Codex 任务</p>';
   document.querySelectorAll('.session').forEach((button) => {
     button.addEventListener('click', () => selectSession(button.dataset.id));
   });
@@ -63,7 +93,7 @@ function renderSessions() {
 
 function selectSession(id) {
   state.selected = id;
-  const session = state.sessions.find((item) => item.id === id);
+  const session = selectedSession();
   $('selected-project').textContent = session ? session.project : '未选择';
   updateSendButton();
   renderSessions();
@@ -71,8 +101,10 @@ function selectSession(id) {
 }
 
 function updateSendButton() {
+  const session = selectedSession();
   const hasInput = Boolean($('prompt').value.trim()) || state.images.length > 0;
-  $('send').disabled = !state.selected || !hasInput || Boolean(state.runId);
+  const externalActive = isExternalDesktopActive(session);
+  $('send').disabled = !state.selected || !hasInput || Boolean(state.runId) || externalActive;
   const running = Boolean(state.runId);
   $('send').hidden = running;
   $('cancel').hidden = !running;
@@ -91,7 +123,7 @@ function updateSelectedState() {
     updateSendButton();
     return;
   }
-  const session = state.sessions.find((item) => item.id === state.selected);
+  const session = selectedSession();
   if (!session) {
     setRunStatus('等待选择任务');
     return;
@@ -100,7 +132,7 @@ function updateSelectedState() {
   state.clock = null;
   const run = session.run;
 
-  if (run && ['queued', 'running'].includes(run.status)) {
+  if (isOwnRunActive(run)) {
     state.runId = run.id;
     const paint = () => setRunStatus(`正在执行 · 已运行 ${elapsedLabel(Date.now() / 1000 - run.started_at)}`);
     paint();
@@ -121,6 +153,10 @@ function updateSelectedState() {
     state.runId = null;
     restoreLastSubmission();
     setRunStatus('已停止 · 上一条内容已恢复，可以修改后重新发送');
+  } else if (isExternalDesktopActive(session)) {
+    state.runId = null;
+    setRunStatus(`桌面端正在运行 · ${desktopActivityDetail(session)} · 最后同步 ${session.updated_label}`);
+    $('run-output').hidden = true;
   } else {
     state.runId = null;
     setRunStatus(`当前空闲 · 最后更新 ${session.updated_label} · 等待你的指令`);
@@ -199,7 +235,7 @@ async function addImages(files) {
 
 async function sendPrompt() {
   const prompt = $('prompt').value.trim();
-  if (!state.selected || (!prompt && !state.images.length) || state.runId) return;
+  if (!state.selected || (!prompt && !state.images.length) || state.runId || isExternalDesktopActive(selectedSession())) return;
   setRunStatus(state.images.length ? '正在上传图片并启动 Codex' : '已发送，Codex 正在执行');
   $('send').disabled = true;
   $('run-output').hidden = true;
@@ -351,7 +387,7 @@ function updateCreateButton() {
 }
 
 function openNewSession() {
-  if (state.runId) return setRunStatus('请先等待当前任务结束或停止当前任务', true);
+  if (state.runId || isExternalDesktopActive(selectedSession())) return setRunStatus('请先等待当前任务结束，再新建或继续任务', true);
   $('new-session-overlay').hidden = false;
   document.body.style.overflow = 'hidden';
   $('new-session-prompt').value = '';
@@ -365,7 +401,7 @@ function closeNewSession() {
 
 async function createSession() {
   const prompt = $('new-session-prompt').value.trim();
-  if (!state.newFolder || !prompt || state.runId) return;
+  if (!state.newFolder || !prompt || state.runId || isExternalDesktopActive(selectedSession())) return;
   $('create-session').disabled = true;
   try {
     const run = await api('/api/sessions/new', {
