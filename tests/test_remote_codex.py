@@ -115,8 +115,8 @@ class FolderBrowserTests(unittest.TestCase):
 
             listing = browser.list(str(root))
 
-            self.assertEqual(listing["folders"], [{"name": "project", "path": str(child)}])
-            self.assertEqual(browser.validate(str(child)), child)
+            self.assertEqual(listing["folders"], [{"name": "project", "path": str(child.resolve())}])
+            self.assertEqual(browser.validate(str(child)), child.resolve())
             with self.assertRaisesRegex(ValueError, "outside"):
                 browser.validate(outside)
 
@@ -240,9 +240,25 @@ class DesktopExecutableTests(unittest.TestCase):
 
             with patch.dict(os.environ, {"LOCALAPPDATA": temp}, clear=False), patch.object(
                 remote.subprocess, "run", return_value=Result()
+            ), patch.object(remote.sys, "platform", "win32"), patch.object(
+                remote.subprocess, "CREATE_NO_WINDOW", 0, create=True
             ):
                 os.environ.pop("REMOTE_CODEX_DESKTOP_EXE", None)
                 self.assertEqual(remote.locate_codex_desktop_executable(), app_server.resolve())
+
+    def test_macos_fallback_selects_chatgpt_app_resource_codex(self):
+        with tempfile.TemporaryDirectory() as temp:
+            app = Path(temp) / "ChatGPT.app"
+            executable = app / "Contents" / "Resources" / "codex"
+            executable.parent.mkdir(parents=True)
+            executable.write_bytes(b"")
+
+            with patch.object(remote, "MACOS_APP_CANDIDATES", [app], create=True), patch.dict(
+                os.environ, {"LOCALAPPDATA": ""},
+                clear=False,
+            ), patch.object(remote.sys, "platform", "darwin"):
+                os.environ.pop("REMOTE_CODEX_DESKTOP_EXE", None)
+                self.assertEqual(remote.locate_codex_desktop_executable(), executable.resolve())
 
 
 class FakeAppServerClient:
@@ -568,7 +584,7 @@ class HttpAuthTests(unittest.TestCase):
             headers={"X-Remote-Codex-Token": "a" * 32},
         )
         data = json.load(urlopen(request))
-        self.assertEqual(data["folders"][0]["path"], self.temp.name)
+        self.assertEqual(data["folders"][0]["path"], str(Path(self.temp.name).resolve()))
 
 
 if __name__ == "__main__":

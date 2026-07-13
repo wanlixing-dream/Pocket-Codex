@@ -15,7 +15,7 @@
 
 > [!IMPORTANT]
 > PocketCodex is an unofficial, community-built project. It is not affiliated with or endorsed by OpenAI.
-> It connects to the `app-server` bundled with the Windows Codex desktop app. It does not require a separate command-line package and is not a remote screen mirror.
+> It connects to the `app-server` bundled with the Codex/ChatGPT desktop app. It does not require a separate command-line package and is not a remote screen mirror.
 
 ## What it does
 
@@ -43,7 +43,7 @@ flowchart LR
     Bridge -->|thread/resume + turn/start| Resume[Continue desktop task]
     New --> Store[Desktop thread store]
     Resume --> Store
-    Store --> Desktop[Windows Codex desktop app]
+    Store --> Desktop[Windows/macOS Codex or ChatGPT desktop app]
     Bridge --> Workspace[Local workspace]
     Server -.optional.-> Notify[ntfy / Pushcut]
 ```
@@ -54,9 +54,8 @@ See [Architecture](./docs/ARCHITECTURE.md) for component boundaries, request flo
 
 ### Desktop
 
-- Windows 10/11. The current release integrates with the Microsoft Store Codex desktop app for Windows.
+- Windows 10/11 with the Microsoft Store **Codex desktop app**, or macOS with the **ChatGPT/Codex desktop app**, installed and signed in.
 - Python 3.10 or newer.
-- The **Windows Codex desktop app** installed from Microsoft Store and signed in.
 - One remote access option:
   - Default setup: [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)
   - Private-network alternative: [Tailscale](https://tailscale.com/download)
@@ -73,18 +72,36 @@ The Python server uses only the standard library. There is no `pip install` step
 
 ### 1. Clone and verify
 
+Windows PowerShell:
+
 ```powershell
 git clone https://github.com/wanlixing-dream/Pocket-Codex.git
 cd Pocket-Codex
 python --version
 ```
 
-Open the Codex desktop app, sign in, and confirm that it can create a local task. PocketCodex discovers the app's bundled app-server automatically; no `codex` command is required on `PATH`.
+macOS Terminal:
+
+```bash
+git clone https://github.com/wanlixing-dream/Pocket-Codex.git
+cd Pocket-Codex
+python3 --version
+```
+
+Open the desktop app, sign in, and confirm that it can create a local task. PocketCodex discovers the bundled app-server automatically: on Windows from the Microsoft Store Codex app, and on macOS from `/Applications/ChatGPT.app/Contents/Resources/codex` or `/Applications/Codex.app/Contents/Resources/codex`.
 
 ### 2. Start PocketCodex
 
+Windows PowerShell:
+
 ```powershell
 python .\remote_codex_server.py
+```
+
+macOS Terminal:
+
+```bash
+python3 remote_codex_server.py
 ```
 
 The server listens only on `http://127.0.0.1:8765` by default. On first start it creates a private `remote.env` containing a random access token. Open the printed local URL on the desktop first and confirm that the desktop task list loads.
@@ -94,9 +111,15 @@ The server listens only on `http://127.0.0.1:8765` by default. On first start it
 
 ### 3. Connect with Cloudflare Quick Tunnel (default)
 
-Install `cloudflared`, keep PocketCodex running, and start a second PowerShell:
+Install `cloudflared`, keep PocketCodex running, and start a second terminal. On macOS you can install it with `brew install cloudflared`; on Windows use Cloudflare's official download page.
 
 ```powershell
+cloudflared tunnel --url http://127.0.0.1:8765
+```
+
+The same command works in macOS Terminal:
+
+```bash
 cloudflared tunnel --url http://127.0.0.1:8765
 ```
 
@@ -133,14 +156,31 @@ Stop sharing with `tailscale serve reset`.
 4. Use the `+` button to choose a folder and create a new desktop task.
 5. Watch the run state, inspect output, or stop the process.
 
+
+## One Phone, Multiple Computers
+
+This works today as “one entry point per computer,” not as a central device dashboard:
+
+- Run `remote_codex_server.py` on each Windows or macOS computer.
+- Start a separate Cloudflare Quick Tunnel or Tailscale Serve URL for each computer.
+- Bookmark each URL on the phone, for example “Home Mac mini” and “Office Windows”.
+- Keep a separate `remote.env` token per computer; do not reuse one token everywhere.
+- The same phone can save multiple entries, but the open page controls only the computer behind that URL.
+
+A future shared device list should add device registration, names, token rotation, online checks, and revocation instead of mixing multiple computers behind one public entry point.
+
 ## Allowed project roots
 
 The new-task folder picker only exposes `Desktop` and `Documents` by default. This is an explicit allowlist, not a refresh problem.
 
-Complete one first start so PocketCodex generates a secure token, then add `REMOTE_CODEX_ROOTS` to `remote.env`. Separate Windows paths with semicolons:
+Complete one first start so PocketCodex generates a secure token, then add `REMOTE_CODEX_ROOTS` to `remote.env`. Separate Windows paths with semicolons and macOS/Linux paths with colons:
 
 ```dotenv
+# Windows
 REMOTE_CODEX_ROOTS=C:\Users\you\Desktop;C:\Users\you\source;D:\Projects
+
+# macOS / Linux
+REMOTE_CODEX_ROOTS=/Users/you/Desktop:/Users/you/Projects
 ```
 
 Restart PocketCodex after changing the setting. The allowlist controls where a new task may start; it is not a filesystem sandbox for Codex and does not restrict existing threads.
@@ -154,7 +194,9 @@ Start from [`remote.env.example`](./remote.env.example), or let PocketCodex crea
 REMOTE_CODEX_TOKEN=replace-with-a-long-random-token
 
 # Optional roots for new desktop tasks.
+# Windows uses semicolons; macOS/Linux use colons.
 REMOTE_CODEX_ROOTS=C:\Users\you\Desktop;D:\Projects
+# REMOTE_CODEX_ROOTS=/Users/you/Desktop:/Users/you/Projects
 ```
 
 The real `remote.env` is excluded by `.gitignore`.
@@ -165,8 +207,9 @@ The hook scripts are optional and are not required for mobile desktop-task contr
 
 - `watch_done.py` sends completion, failure, and usage-limit notifications.
 - `watch_approve.py` forwards supported interactive Codex or Claude Code approvals to a phone or watch.
-- ntfy supports phone and Wear OS notifications.
-- Pushcut can provide richer iPhone and Apple Watch actions.
+- Core mobile remote control does not require ntfy or Pushcut.
+- ntfy supports Android, Wear OS, regular phone notifications, and optional Quick Tunnel new-link alerts.
+- Pushcut can provide richer iPhone and Apple Watch actions; dynamic buttons and some advanced features may require Pushcut Pro.
 
 PocketCodex uses its own app-server connection. Interactive approval requests are not automatically transferred to another open desktop window; the current remote endpoint rejects unsupported requests instead of approving them. See [Notifications and approvals](./docs/NOTIFICATIONS.md).
 
@@ -218,7 +261,7 @@ python -m unittest discover -s tests -v
 python -m py_compile remote_codex_server.py watch_approve.py watch_done.py
 ```
 
-Core unit tests run without network access; desktop discovery and end-to-end app-server verification are Windows-specific.
+Core unit tests run without network access; desktop discovery covers Windows and macOS, while end-to-end app-server verification should be run on the target desktop OS.
 
 ## Troubleshooting
 
@@ -226,9 +269,9 @@ Core unit tests run without network access; desktop discovery and end-to-end app
 | --- | --- |
 | The phone shows `Unauthorized` | Reopen a URL with the current `#token=`; after rotation, clear this site's browser storage |
 | Projects outside Desktop/Documents are missing | Add `REMOTE_CODEX_ROOTS` to the generated `remote.env`, then restart the server |
-| The task list is empty | Complete at least one task in the Codex desktop app under the same Windows account |
+| The task list is empty | Complete at least one task in the Codex/ChatGPT desktop app under the same OS user |
 | The phone cannot connect | Verify that the Python server is running, then inspect `tailscale serve status` or the cloudflared console |
-| Codex desktop cannot be found | Install and launch Codex from Microsoft Store, or set `REMOTE_CODEX_DESKTOP_EXE` to its bundled `codex.exe` |
+| Desktop app-server cannot be found | Windows: install and launch Codex from Microsoft Store. macOS: install and launch ChatGPT/Codex. You can also set `REMOTE_CODEX_DESKTOP_EXE` to the bundled `codex`/`codex.exe` |
 | A remote run needs approval | Return to the Codex desktop app; PocketCodex never auto-approves unsupported sensitive actions |
 
 Contributions are welcome. Changes involving authentication, filesystem access, or command execution should document their threat model and verification evidence.

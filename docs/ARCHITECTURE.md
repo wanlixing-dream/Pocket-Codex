@@ -4,7 +4,7 @@
 
 ## 1. 系统边界
 
-PocketCodex 是运行在用户桌面电脑上的轻量 HTTP 服务。手机浏览器通过安全隧道访问该服务，服务再连接 Windows Codex 桌面 App 随附的 `app-server`，读取、新建或继续同一份持久化 thread。
+PocketCodex 是运行在用户桌面电脑上的轻量 HTTP 服务。手机浏览器通过安全隧道访问该服务，服务再连接 Windows/macOS Codex 或 ChatGPT 桌面 App 随附的 `app-server`，读取、新建或继续同一份持久化 thread。
 
 它不包含云端业务服务器，不把项目文件同步到 PocketCodex 自有云端，也不通过鼠标或窗口自动化控制 Codex。PocketCodex 与桌面窗口共享 thread 存储，但两者使用各自的 app-server 进程。
 
@@ -30,7 +30,7 @@ flowchart TB
         Workspaces[本机 thread 工作目录]
         Locator[Codex Desktop 定位器]
         AppServer[桌面 App 随附 app-server]
-        DesktopApp[Windows Codex 桌面窗口]
+        DesktopApp[Codex/ChatGPT 桌面窗口]
         Uploads[.remote_uploads]
     end
 
@@ -93,13 +93,14 @@ flowchart TB
 ### DesktopAppLocator
 
 - 优先读取 `REMOTE_CODEX_DESKTOP_EXE` 显式路径。
-- 自动查找 `%LOCALAPPDATA%\OpenAI\Codex\bin\*\codex.exe` 中桌面 App 缓存的 app-server。
-- 必要时通过 `Get-AppxPackage OpenAI.Codex` 获取 Microsoft Store 安装目录。
+- Windows 自动查找 `%LOCALAPPDATA%\OpenAI\Codex\bin\*\codex.exe` 中桌面 App 缓存的 app-server。
+- Windows 必要时通过 `Get-AppxPackage OpenAI.Codex` 获取 Microsoft Store 安装目录。
+- macOS 自动查找 `/Applications/ChatGPT.app/Contents/Resources/codex`、`~/Applications/ChatGPT.app/Contents/Resources/codex`、`/Applications/Codex.app/Contents/Resources/codex` 和 `~/Applications/Codex.app/Contents/Resources/codex`。
 - 不会回退到 `PATH` 上的同名命令，确保始终使用桌面 App 随附的 app-server。
 
 ### AppServerClient 与 RunManager
 
-- 启动 Codex 桌面 App 随附的 `codex.exe ... app-server --stdio`。
+- 启动桌面 App 随附的 `codex`/`codex.exe ... app-server --stdio`。
 - 通过逐行 JSON 协议完成 `initialize` 握手。
 - 新任务依次调用 `thread/start` 和 `turn/start`。
 - 已有任务依次调用 `thread/resume` 和 `turn/start`。
@@ -180,6 +181,10 @@ sequenceDiagram
 - URL 重启后通常改变，不适合作为固定服务地址。
 - 当前方案没有 Cloudflare Access 身份策略，不应视为私有网络。
 
+### 多电脑使用
+
+PocketCodex 当前没有中心设备注册服务。一个手机连接多台电脑时，每台电脑应各自运行服务、隧道和独立 token，手机通过不同 URL/书签切换。多电脑统一入口需要额外的设备身份、撤销和在线状态设计，不能只靠共享一个公网 URL 或共享 token。
+
 ### Tailscale Serve
 
 无法或不便使用 Tailscale 的用户不需要安装它。已经具备 Tailscale 条件、并希望获得固定私有入口时，可以选择该方案：
@@ -244,7 +249,7 @@ flowchart LR
 
 ## 7. 后续架构方向
 
-- 将启动、隧道和配置检查收敛为统一的 Windows 配置向导。
+- 将启动、隧道和配置检查收敛为统一的跨平台配置向导。
 - 用可撤销、可过期的设备凭证替代单一长期令牌。
 - 增加持久化 run 记录和上传文件清理策略。
 - 增加结构化日志、健康状态和诊断导出。

@@ -12,6 +12,7 @@ import os
 import re
 import secrets
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -20,7 +21,7 @@ from datetime import datetime
 from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any, Callable, TextIO
 from urllib.parse import parse_qs, urlparse
 
@@ -37,6 +38,12 @@ MAX_PROMPT_CHARS = 20_000
 MAX_IMAGES = 4
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 MAX_REQUEST_BYTES = MAX_PROMPT_CHARS * 4 + MAX_IMAGES * (MAX_IMAGE_BYTES * 4 // 3 + 1024)
+MACOS_APP_CANDIDATES = [
+    Path("/Applications/ChatGPT.app"),
+    Path.home() / "Applications" / "ChatGPT.app",
+    Path("/Applications/Codex.app"),
+    Path.home() / "Applications" / "Codex.app",
+]
 
 
 def locate_codex_desktop_executable() -> Path:
@@ -58,7 +65,13 @@ def locate_codex_desktop_executable() -> Path:
         if candidates:
             return candidates[0].resolve()
 
-    if os.name == "nt":
+    if sys.platform == "darwin":
+        for app in MACOS_APP_CANDIDATES:
+            app_server = app / "Contents" / "Resources" / "codex"
+            if app_server.is_file():
+                return app_server.resolve()
+
+    if sys.platform == "win32":
         powershell = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
         try:
             result = subprocess.run(
@@ -86,7 +99,8 @@ def locate_codex_desktop_executable() -> Path:
         except (OSError, subprocess.TimeoutExpired):
             pass
     raise FileNotFoundError(
-        "Codex Desktop was not found. Install the Windows Codex app or set REMOTE_CODEX_DESKTOP_EXE."
+        "Codex Desktop was not found. Install the Codex or ChatGPT desktop app, "
+        "or set REMOTE_CODEX_DESKTOP_EXE to its bundled app-server executable."
     )
 
 
@@ -345,6 +359,14 @@ def _shorten(text: str, limit: int = 100) -> str:
     return clean if len(clean) <= limit else clean[: limit - 1] + "..."
 
 
+def _project_name(cwd: str, fallback: str) -> str:
+    if not cwd:
+        return fallback
+    if "\\" in cwd or re.match(r"^[A-Za-z]:", cwd):
+        return PureWindowsPath(cwd).name or fallback
+    return Path(cwd).name or fallback
+
+
 def _image_extension(data: bytes) -> str | None:
     if data.startswith(b"\xff\xd8\xff"):
         return ".jpg"
@@ -460,7 +482,7 @@ class SessionStore:
             return None
 
         updated = path.stat().st_mtime
-        project = Path(cwd).name if cwd else "Unknown project"
+        project = _project_name(cwd, "Unknown project")
         first = prompts[0] if prompts else "Codex session"
         last = prompts[-1] if prompts else first
         return SessionInfo(
@@ -515,7 +537,7 @@ class DesktopSessionStore:
         return SessionInfo(
             id=thread_id,
             cwd=cwd,
-            project=Path(cwd).name if cwd else "Codex Desktop",
+            project=_project_name(cwd, "Codex Desktop"),
             updated_at=updated,
             updated_label=datetime.fromtimestamp(updated).strftime("%m-%d %H:%M"),
             title=_shorten(title, 72),
