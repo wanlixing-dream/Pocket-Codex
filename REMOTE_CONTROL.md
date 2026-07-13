@@ -30,6 +30,16 @@ The phone must be able to reach `trycloudflare.com`. Some mainland-China users r
 
 Quick Tunnel is a public endpoint. Keep the token private and stop cloudflared when it is not needed.
 
+You can start both pieces from one terminal with the cross-platform helper:
+
+```bash
+python3 start_remote_codex.py
+```
+
+On Windows, use `python .\start_remote_codex.py`. The helper prints the current private phone URL and keeps the tunnel in the foreground.
+
+If the phone displays Cloudflare `Error 1016 Origin DNS error`, the old Quick Tunnel hostname is no longer resolvable or cloudflared is not running. Start a new tunnel and open the newly printed URL; refreshing an expired `trycloudflare.com` link cannot recover it.
+
 ## Tailscale alternative
 
 Tailscale remains available as a private-network option for users who can install it on both devices:

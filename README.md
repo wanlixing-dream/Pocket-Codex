@@ -145,7 +145,25 @@ https://随机地址.trycloudflare.com/#token=你的_REMOTE_CODEX_TOKEN
 
 6. 用手机打开该地址。页面会把令牌保存在当前浏览器中，并从地址栏移除令牌片段。
 
+也可以用跨平台辅助脚本一次启动 PocketCodex 和 Quick Tunnel：
+
+Windows PowerShell：
+
+```powershell
+python .\start_remote_codex.py
+```
+
+macOS Terminal：
+
+```bash
+python3 start_remote_codex.py
+```
+
+脚本会等待服务和隧道可用，然后打印手机要打开的完整私有链接，并保持在前台运行。关闭该终端或按 `Ctrl+C` 会停止本次启动的服务和隧道。
+
 Quick Tunnel 地址通常会在 cloudflared 重启后改变。该地址可从公网访问，访问令牌是主要的应用层防线，不要把完整链接发到群聊、Issue 或截图中。
+
+如果手机刷新后看到 Cloudflare `Error 1016 Origin DNS error`，通常不是 PocketCodex 前端坏了，而是旧的 `*.trycloudflare.com` 临时域名已经失效，或电脑上的 cloudflared 已停止。重新运行上面的脚本或 `cloudflared tunnel --url http://127.0.0.1:8765`，用新生成的地址打开即可。
 
 #### 方案 B：Tailscale Serve（私有网络备选）
 

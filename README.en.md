@@ -131,6 +131,24 @@ https://random-name.trycloudflare.com/#token=YOUR_REMOTE_CODEX_TOKEN
 
 The web client stores the token in that browser and removes the fragment from the address bar. Quick Tunnel URLs are public and normally change after cloudflared restarts, so never share the complete URL in chats, issues, or screenshots.
 
+You can also use the cross-platform helper to start PocketCodex and the Quick Tunnel together:
+
+Windows PowerShell:
+
+```powershell
+python .\start_remote_codex.py
+```
+
+macOS Terminal:
+
+```bash
+python3 start_remote_codex.py
+```
+
+The helper waits until both services are ready, prints the private phone URL, and stays in the foreground. Closing that terminal or pressing `Ctrl+C` stops the processes started by the helper.
+
+If the phone shows Cloudflare `Error 1016 Origin DNS error` after refreshing, the old `*.trycloudflare.com` quick-tunnel hostname has usually expired or cloudflared stopped on the desktop. Start the helper again, or rerun `cloudflared tunnel --url http://127.0.0.1:8765`, then open the new URL.
+
 ### 4. Tailscale Serve (private-network alternative)
 
 Tailscale adds device identity and tailnet ACLs. Use it when it is available and you prefer a stable private address:

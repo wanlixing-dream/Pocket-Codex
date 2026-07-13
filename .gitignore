@@ -19,4 +19,5 @@ Thumbs.db
 .idea/
 .vscode/
 .remote_uploads/
+.remote_runtime/
 release/
