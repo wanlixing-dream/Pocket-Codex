@@ -1,5 +1,7 @@
 import io
 import json
+import os
+import stat
 import tempfile
 import unittest
 from pathlib import Path
@@ -41,6 +43,17 @@ class StartRemoteCodexTests(unittest.TestCase):
 
         self.assertEqual(values["REMOTE_CODEX_TOKEN"], "abc123")
         self.assertEqual(values["REMOTE_CODEX_ROOTS"], "/Users/me/Desktop:/Users/me/Projects")
+
+    @unittest.skipIf(os.name == "nt", "POSIX permission bits are not available on Windows")
+    def test_parse_env_file_restricts_permissions(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "watch.env"
+            path.write_text("NTFY_NOTIFY_TOPIC=private-topic\n", encoding="utf-8")
+            path.chmod(0o644)
+
+            starter.parse_env_file(path)
+
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
 
     def test_public_url_ready_rejects_network_error(self):
         ready = getattr(starter, "public_url_ready", None)

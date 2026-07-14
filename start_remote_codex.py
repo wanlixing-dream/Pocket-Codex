@@ -27,6 +27,15 @@ LOCAL_URL = "http://127.0.0.1:8765"
 TRYCLOUDFLARE_RE = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com", re.IGNORECASE)
 
 
+def restrict_private_file(path: Path) -> None:
+    if os.name == "nt":
+        return
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
+
+
 def default_runtime_dir() -> Path:
     override = os.environ.get("POCKET_CODEX_RUNTIME_DIR", "").strip()
     if override:
@@ -43,6 +52,7 @@ def parse_env_file(path: Path) -> dict[str, str]:
     values: dict[str, str] = {}
     if not path.exists():
         return values
+    restrict_private_file(path)
     for raw_line in path.read_text(encoding="utf-8").splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#") or "=" not in line:

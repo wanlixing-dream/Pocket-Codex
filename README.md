@@ -111,7 +111,7 @@ python3 remote_codex_server.py
 http://127.0.0.1:8765
 ```
 
-首次启动会在项目目录生成私有配置 `remote.env`，其中包含随机访问令牌。终端会打印一条带令牌的本地地址，先在电脑浏览器打开它，确认可以看到桌面任务列表。
+首次启动会在项目目录生成私有配置 `remote.env`，其中包含随机访问令牌；macOS/Linux 会自动把文件权限收紧为仅当前用户可读写。终端会打印一条带令牌的本地地址，先在电脑浏览器打开它，确认可以看到桌面任务列表。
 
 > [!WARNING]
 > 不要提交、截图或公开分享 `remote.env`。任何拿到令牌的人都可能通过 PocketCodex 向你的桌面版 Codex thread 发送指令。
@@ -257,7 +257,7 @@ REMOTE_CODEX_ROOTS=C:\Users\you\Desktop;D:\Projects
 # REMOTE_CODEX_ROOTS=/Users/you/Desktop:/Users/you/Projects
 ```
 
-可以从 [`remote.env.example`](./remote.env.example) 开始配置。真实的 `remote.env` 已被 `.gitignore` 排除。
+可以从 [`remote.env.example`](./remote.env.example) 开始配置。真实的 `remote.env` 已被 `.gitignore` 排除；辅助脚本读取 `remote.env` 和 `watch.env` 时，也会在 macOS/Linux 上自动将权限收紧为 `600`。
 
 ## 可选：手机/手表通知与审批
 

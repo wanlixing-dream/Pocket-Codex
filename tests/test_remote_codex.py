@@ -2,6 +2,7 @@ import base64
 import json
 import os
 import queue
+import stat
 import tempfile
 import threading
 import time
@@ -13,6 +14,28 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 import remote_codex_server as remote
+
+
+class TokenFileTests(unittest.TestCase):
+    @unittest.skipIf(os.name == "nt", "POSIX permission bits are not available on Windows")
+    def test_ensure_token_creates_private_env_file(self):
+        with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {}, clear=True):
+            path = Path(temp) / "remote.env"
+
+            remote.ensure_token(path)
+
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+
+    @unittest.skipIf(os.name == "nt", "POSIX permission bits are not available on Windows")
+    def test_ensure_token_restricts_existing_env_file(self):
+        with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {}, clear=True):
+            path = Path(temp) / "remote.env"
+            path.write_text("REMOTE_CODEX_TOKEN=" + "a" * 32 + "\n", encoding="ascii")
+            path.chmod(0o644)
+
+            remote.ensure_token(path)
+
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
 
 
 class SessionStoreTests(unittest.TestCase):

@@ -50,6 +50,15 @@ MACOS_APP_CANDIDATES = [
 MACOS_EXECUTABLE_CACHE = Path.home() / "Library" / "Caches" / "PocketCodex" / "codex"
 
 
+def restrict_private_file(path: Path) -> None:
+    if os.name == "nt":
+        return
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
+
+
 def _cache_macos_executable(source: Path) -> Path:
     target = MACOS_EXECUTABLE_CACHE.expanduser()
     source_stat = source.stat()
@@ -327,6 +336,7 @@ class AppServerClient:
 def load_env(path: Path) -> None:
     if not path.exists():
         return
+    restrict_private_file(path)
     for raw_line in path.read_text(encoding="utf-8-sig").splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#") or "=" not in line:
@@ -346,6 +356,7 @@ def ensure_token(path: Path) -> str:
         f"REMOTE_CODEX_TOKEN={token}\n",
         encoding="ascii",
     )
+    restrict_private_file(path)
     os.environ["REMOTE_CODEX_TOKEN"] = token
     return token
 
