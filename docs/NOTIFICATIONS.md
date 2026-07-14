@@ -85,7 +85,7 @@ python .\start_remote_codex.py
 脚本会：
 
 1. 等待 PocketCodex 本地 API 可用。
-2. 创建 Quick Tunnel，并等待生成的公网地址返回成功状态。
+2. 创建 Quick Tunnel，并等待带令牌的公网 sessions API 连续返回成功状态，避开地址刚生成时的 DNS/Cloudflare `530` 短暂波动。
 3. 保存带 `#token=` 的完整地址到私有运行目录。
 4. 向 ntfy 发送标题为 `PocketCodex 新链接` 的通知；点击通知或 `打开 PocketCodex` 按钮会打开该地址。
 5. 仅在通知成功后更新 `last-notified-url.txt`，相同地址不会重复发送。

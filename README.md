@@ -175,7 +175,7 @@ NTFY_BASE=https://ntfy.sh
 
 4. 运行 `python3 start_remote_codex.py`（Windows 使用 `python .\start_remote_codex.py`）。
 
-辅助脚本会先等待公网地址真正可访问，再发送一条可点击的 ntfy 通知；相同链接不会重复推送。ntfy 暂时不可用时只记录警告，不会关闭 PocketCodex 或隧道。完整配置见 [通知与审批](./docs/NOTIFICATIONS.md#quick-tunnel-新链接通知)。
+辅助脚本会先等待带令牌的公网 API 连续通过检查，再发送一条可点击的 ntfy 通知；相同链接不会重复推送。ntfy 暂时不可用时只记录警告，不会关闭 PocketCodex 或隧道。完整配置见 [通知与审批](./docs/NOTIFICATIONS.md#quick-tunnel-新链接通知)。
 
 Quick Tunnel 地址通常会在 cloudflared 重启后改变。该地址可从公网访问，访问令牌是主要的应用层防线，不要把完整链接发到群聊、Issue 或截图中。
 

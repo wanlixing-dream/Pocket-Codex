@@ -70,20 +70,34 @@ class StartRemoteCodexTests(unittest.TestCase):
         self.assertIsNotNone(ready)
 
         with patch.object(starter, "urlopen", side_effect=starter.URLError("not ready")):
-            self.assertFalse(ready("https://pending.trycloudflare.com"))
+            self.assertFalse(ready("https://pending.trycloudflare.com", "secret-token"))
 
-    def test_wait_for_public_url_retries_until_success(self):
+    def test_public_url_ready_checks_authenticated_sessions_api(self):
+        response = MagicMock()
+        response.status = 200
+        response.__enter__.return_value = response
+
+        with patch.object(starter, "urlopen", return_value=response) as open_url:
+            self.assertTrue(starter.public_url_ready("https://ready.trycloudflare.com", "secret-token"))
+
+        request = open_url.call_args.args[0]
+        self.assertEqual(request.full_url, "https://ready.trycloudflare.com/api/sessions")
+        self.assertEqual(request.get_header("X-remote-codex-token"), "secret-token")
+
+    def test_wait_for_public_url_requires_four_consecutive_successes(self):
         wait_for_public_url = getattr(starter, "wait_for_public_url", None)
         self.assertIsNotNone(wait_for_public_url)
         process = Mock()
         process.poll.return_value = None
 
-        with patch.object(starter, "public_url_ready", side_effect=[False, True]) as ready, patch.object(
+        results = [True, True, False, True, True, True, True]
+        with patch.object(starter, "public_url_ready", side_effect=results) as ready, patch.object(
             starter.time, "sleep"
-        ):
-            wait_for_public_url("https://ready.trycloudflare.com", process, timeout=5)
+        ), patch.object(starter.time, "time", side_effect=range(20)):
+            wait_for_public_url("https://ready.trycloudflare.com", "secret-token", process, timeout=15)
 
-        self.assertEqual(ready.call_count, 2)
+        self.assertEqual(ready.call_count, 7)
+        ready.assert_called_with("https://ready.trycloudflare.com", "secret-token")
 
     def test_builds_ntfy_json_request_with_click_and_view_action(self):
         build_request = getattr(starter, "build_ntfy_request", None)
@@ -244,6 +258,6 @@ class StartRemoteCodexTests(unittest.TestCase):
 
             self.assertEqual(processes, [tunnel])
             self.assertEqual(result_url, full_url)
-            wait_for_public.assert_called_once_with(public_url, tunnel, args.tunnel_timeout)
+            wait_for_public.assert_called_once_with(public_url, "fake-token", tunnel, args.tunnel_timeout)
             notify.assert_called_once_with(watch_env, runtime, full_url, timeout=args.notify_timeout)
             self.assertEqual((runtime / "remote-url.txt").read_text(encoding="utf-8").strip(), full_url)

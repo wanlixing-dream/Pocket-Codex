@@ -43,7 +43,7 @@ The user's real settings live only in ignored `watch.env`.
 
 ### Public URL Readiness
 
-After cloudflared prints a Quick Tunnel URL, the helper repeatedly requests its public root until it returns an HTTP success response or the existing tunnel timeout expires. Transient DNS failures, Cloudflare `530` responses, and connection errors are retried.
+After cloudflared prints a Quick Tunnel URL, the helper repeatedly requests the authenticated public sessions API until it returns four consecutive HTTP 200 responses or the existing tunnel timeout expires. Transient DNS failures, Cloudflare `530` responses, and connection errors reset the stability counter and are retried.
 
 The private PocketCodex token is not needed for this readiness request because the static root is public.
 

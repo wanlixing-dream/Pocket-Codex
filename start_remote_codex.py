@@ -161,22 +161,36 @@ def server_ready(token: str, timeout: float = 2.0) -> bool:
         return False
 
 
-def public_url_ready(public_url: str, timeout: float = 5.0) -> bool:
+def public_url_ready(public_url: str, token: str, timeout: float = 5.0) -> bool:
+    request = Request(
+        f"{public_url.rstrip('/')}/api/sessions",
+        headers={"X-Remote-Codex-Token": token},
+    )
     try:
-        with urlopen(public_url, timeout=timeout) as response:
-            return 200 <= response.status < 400
+        with urlopen(request, timeout=timeout) as response:
+            return response.status == 200
     except (OSError, URLError):
         return False
 
 
-def wait_for_public_url(public_url: str, process: subprocess.Popen[str], timeout: float) -> None:
+def wait_for_public_url(
+    public_url: str,
+    token: str,
+    process: subprocess.Popen[str],
+    timeout: float,
+) -> None:
     deadline = time.time() + timeout
+    consecutive_successes = 0
     while time.time() < deadline:
         if process.poll() is not None:
             raise RuntimeError(f"cloudflared exited early with code {process.returncode}.")
-        if public_url_ready(public_url):
-            return
-        time.sleep(1)
+        if public_url_ready(public_url, token):
+            consecutive_successes += 1
+            if consecutive_successes >= 4:
+                return
+        else:
+            consecutive_successes = 0
+        time.sleep(3)
     raise TimeoutError(f"Cloudflare Quick Tunnel did not become reachable: {public_url}")
 
 
@@ -274,7 +288,7 @@ def start_processes(args: argparse.Namespace) -> tuple[list[subprocess.Popen[str
     threading.Thread(target=stream_process_output, args=(tunnel.stdout, tunnel_log, line_queue), daemon=True).start()
 
     public_url = wait_for_tunnel_url(tunnel, line_queue, args.tunnel_timeout)
-    wait_for_public_url(public_url, tunnel, args.tunnel_timeout)
+    wait_for_public_url(public_url, token, tunnel, args.tunnel_timeout)
     full_url = mobile_url(public_url, token)
     (runtime_dir / "remote-url.txt").write_text(full_url + "\n", encoding="utf-8")
     notify_mobile_url(
