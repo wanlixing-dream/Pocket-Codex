@@ -18,3 +18,5 @@ venv/
 Thumbs.db
 .idea/
 .vscode/
+.remote_uploads/
+release/

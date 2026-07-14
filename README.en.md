@@ -1,455 +1,265 @@
 <div align="center">
 
-# ⌚ agent-watch-approve
+# PocketCodex
 
-**Your AI codes, you relax: approve risky actions from your wrist, get buzzed when the job is done.**
+**Connect to and control Codex CLI sessions on your desktop from a phone browser.**
 
-Routes **Claude Code** and **Codex** approval requests to your **Apple Watch / iPhone**
-with ✅ Allow / ❌ Deny buttons, and pings you when each task finishes — no terminal babysitting.
-**Android / Wear OS / HarmonyOS (compat mode) work too**: one switch moves everything onto ntfy — no Pushcut needed (see "Beyond Apple").
-
-[![CI](https://github.com/ghy196830-del/agent-watch-approve/actions/workflows/ci.yml/badge.svg)](https://github.com/ghy196830-del/agent-watch-approve/actions)
+[![CI](https://github.com/wanlixing-dream/Pocket-Codex/actions/workflows/ci.yml/badge.svg)](https://github.com/wanlixing-dream/Pocket-Codex/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE)
-![Python](https://img.shields.io/badge/Python-3%20stdlib%20only-blue)
-![Agents](https://img.shields.io/badge/Agents-Claude%20Code%20%7C%20Codex-orange)
-![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
+![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
+![Dependencies](https://img.shields.io/badge/Python_dependencies-none-brightgreen)
 
-**[中文文档](./README.md)**
-
-<img src="./assets/showcase/hero.png" alt="AI agent approvals on your wrist" width="100%">
-
-| Claude Code notifications | Codex notifications |
-|:---:|:---:|
-| <img src="./assets/clawd-crab.gif" width="320" alt="Claude crab"> | <img src="./assets/gpt-cat.png" width="320" alt="GPT knot cat"> |
+**[中文](./README.md)** · **[Architecture](./docs/ARCHITECTURE.md)** · **[Notifications and approvals](./docs/NOTIFICATIONS.md)**
 
 </div>
 
-## 📺 See it in action
-
-<div align="center">
-  <img src="./assets/showcase/approve-loop.gif" width="380" alt="risky action -> watch buzz -> one tap to approve">
-  <br>
-  <sub>Risky action → watch buzzes → ✅ one tap, the agent keeps going</sub>
-</div>
-
-▶️ **[Full intro video (30s)](https://cdn.jsdelivr.net/gh/ghy196830-del/agent-watch-approve@c757785/assets/showcase/intro.mp4)** — opens in your player (fallback: [repo file](./assets/showcase/intro.mp4))
-
-### Feature gallery
-
-| | | |
-|:---:|:---:|:---:|
-| [<img src="./assets/showcase/card-claude-approve.jpg" width="260">](./assets/showcase/card-claude-approve.jpg) | [<img src="./assets/showcase/card-codex-approve.jpg" width="260">](./assets/showcase/card-codex-approve.jpg) | [<img src="./assets/showcase/card-hook-protect.jpg" width="260">](./assets/showcase/card-hook-protect.jpg) |
-| Risky commands ask you first | Codex CLI works the same | Even editing the hook needs approval |
-| [<img src="./assets/showcase/card-task-done.jpg" width="260">](./assets/showcase/card-task-done.jpg) | [<img src="./assets/showcase/card-rate-limit.jpg" width="260">](./assets/showcase/card-rate-limit.jpg) | [<img src="./assets/showcase/card-terminal-forced.jpg" width="260">](./assets/showcase/card-terminal-forced.jpg) |
-| Done? Your wrist knows | Quota alerts, instantly | A heads-up even when the terminal must confirm |
-
-### 📸 Real-device photos
-
-<div align="center">
-  <img src="./assets/photos/real-shots.jpg" width="100%" alt="Real-device shots: Claude deletion approval / Codex git push approval / task-done notification">
-  <br>
-  <sub>Left: Claude asks to delete a folder · Middle: Codex asks to git push · Right: task done — a glance at the wrist is all it takes</sub>
-</div>
-
----
-
-## 🚀 Fastest path to success (5 steps)
-
-1. **Install [Pushcut](https://www.pushcut.io/)** (iPhone + Apple Watch), create a Notification in the app (any name), grab the API key from Account → API;
-2. **Pick a long random [ntfy](https://ntfy.sh/) topic** (no signup; the name is the password, e.g. `myagent_8f3k2j9x`);
-3. **Drop the scripts** — `watch_approve.py` / `watch_done.py` / `watch.env` (copied from `watch.env.example`) into a stable folder, fill in key/topic;
-4. **Self-check**: `python watch_approve.py --doctor` — validates config placeholders, Pushcut key/device names/notification name, ntfy round-trip, then sends a real test notification;
-5. **Wire up**: `python watch_approve.py --print-claude-config` / `--print-codex-config` prints paste-ready snippets with the absolute paths already escaped; merge, restart the agent, test with a risky command.
-
-Details for each step below; if anything misbehaves, run `--doctor` first, then see Troubleshooting.
-(**Android / Wear OS users**: replace step 1 with installing the ntfy app — no Pushcut needed; see "Beyond Apple".)
+> [!IMPORTANT]
+> PocketCodex is an unofficial, community-built project. It is not affiliated with or endorsed by OpenAI.
+> It runs Codex CLI through `exec` and `exec resume`; it does not remotely automate the Codex desktop GUI.
 
 ## What it does
 
-1. **⌚ Remote approval** — risky actions (`rm -rf`, `git push --force`, privilege escalation, sandbox escapes…) push a notification with **✅ Allow / ❌ Deny / 🖥️ view in terminal** buttons to your watch; your tap flows back to the agent in seconds ("view in terminal" defers to the normal terminal prompt when you'd rather read the full command first).
-2. **🤔 Multiple-choice questions on your wrist** — when Claude pops a decision prompt in the terminal ("option A or option B?"), it goes to the watch too, with **Option A / Option B / 🖥️ answer in terminal** buttons; your tap becomes Claude's answer and it keeps working.
-3. **🔔 Done notifications** — every time the agent finishes a turn, your wrist buzzes "task complete".
-4. **🚦 Usage-limit alerts** — get notified the moment your subscription quota runs out (Claude) or is about to (Codex, ≥90% warning by default), with the reset time; turns killed by API errors alert you too.
-5. **🤖 Autopilot for the rest** — non-risky operations are silently auto-approved (configurable), so the terminal never prompts again.
-6. **🪟 Multi-window safe** — run several projects/windows at once without cross-talk: every approval gets its own reply channel, so a tap resolves only its own request; notifications carry a "📁 project folder" line so you can tell who's asking.
+- Lists recent Codex sessions stored on your desktop.
+- Sends a new text prompt to an existing session.
+- Creates a session in an allowed project folder.
+- Uploads JPEG, PNG, or WebP images for Codex to inspect.
+- Shows run status, elapsed time, and output, and can stop an active run.
+- Supports browser speech recognition for voice input.
+- Optionally sends completion and approval notifications through ntfy or Pushcut.
 
-Two Python scripts, **standard library only, zero dependencies**, and **fail-safe end to end**: missing config, network failure, or timeout all fall back to the agent's normal in-terminal prompt — your run never hangs.
+Codex, its sessions, and your project files remain on your desktop. The phone is only a remote client.
+
+## How it works
 
 ```mermaid
-sequenceDiagram
-    participant A as Claude Code / Codex
-    participant H as watch_approve.py
-    participant P as Pushcut cloud
-    participant W as ⌚ Apple Watch
-    participant N as ntfy.sh
-    A->>H: risky action triggers hook
-    H->>P: trigger notification (inject ✅/❌ buttons)
-    P->>W: Time-Sensitive alert reaches the watch
-    W->>N: button = background web request → publish allow/deny
-    N-->>H: hook reads the verdict from the stream
-    H-->>A: allow / deny
+flowchart LR
+    Phone[Phone browser] -->|HTTPS| Access{Access layer}
+    Access -->|Default for mainland China| CF[Cloudflare Quick Tunnel]
+    Access -->|Private-network alternative| TS[Tailscale Serve]
+    TS --> Server[PocketCodex server<br/>127.0.0.1:8765]
+    CF --> Server
+    Server --> Sessions[Read ~/.codex/sessions]
+    Server --> Runner[Start local Codex CLI]
+    Runner -->|New| New[codex exec]
+    Runner -->|Resume| Resume[codex exec resume]
+    New --> Workspace[Local workspace]
+    Resume --> Workspace
+    Server -.optional.-> Notify[ntfy / Pushcut]
 ```
+
+See [Architecture](./docs/ARCHITECTURE.md) for component boundaries, request flows, and the security model.
 
 ## Requirements
 
-- **Claude Code** and/or **Codex CLI**
-- **Python 3** on PATH (stdlib only — nothing to `pip install`)
-- A **[Pushcut](https://www.pushcut.io/)** account (**Pro** for dynamically-injected buttons), app installed on iPhone **and Apple Watch**
-- An **[ntfy](https://ntfy.sh/)** topic (public ntfy.sh is fine — **the topic name is the password, make it long and random**)
-- (Optional) a local HTTP proxy such as `http://127.0.0.1:7890` if your network needs one
+### Desktop
 
-## Setup in 10 minutes
+- Windows 10/11. The core Python server can also run on macOS/Linux, but the bundled automation script is Windows-oriented.
+- Python 3.10 or newer.
+- [Codex CLI](https://developers.openai.com/codex/cli) installed, available on `PATH`, and signed in.
+- One remote access option:
+  - Default setup: [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)
+  - Private-network alternative: [Tailscale](https://tailscale.com/download)
 
-### Step 0 — Pushcut & ntfy
+### Phone
 
-1. In Pushcut, create a Notification (any name → goes into `PUSHCUT_NOTIF`). Leave title/text/actions empty — the hook overrides them dynamically.
-2. Grab your API key from **Account → API**.
-3. Pick a long random ntfy topic, e.g. `myagent_8f3k2j9x` (nothing to register).
+- Safari, Chrome, or another modern browser.
+- The phone must be able to reach the generated `trycloudflare.com` URL. Some mainland-China iPhone users use an already-installed proxy client such as Shadowrocket; PocketCodex does not provide a proxy service.
+- Tailscale installed and signed in to the same tailnet only when using the alternative setup.
 
-### Step 1 — Install the scripts
+The Python server uses only the standard library. There is no `pip install` step.
 
-Put `watch_approve.py`, `watch_done.py` and `watch.env` in a **stable folder**, e.g. `~/watch-hooks/`:
+## Quick start
 
-```bash
-git clone https://github.com/ghy196830-del/agent-watch-approve.git
-cp agent-watch-approve/watch_approve.py agent-watch-approve/watch_done.py ~/watch-hooks/
-cp agent-watch-approve/watch.env.example ~/watch-hooks/watch.env   # then fill in your key/topic
-```
-
-> **Why `watch.env`?** Hook processes inherit env vars from whoever launched the agent, and Codex
-> does **not** pass its configured env to hooks. The scripts read `watch.env` next to themselves as a
-> fallback (it only fills in *missing* variables — real env vars always win), so they work no matter
-> where the agent was launched from.
-
-### Step 2 — Wire up Claude Code
-
-**Lazy way**: `python watch_approve.py --print-claude-config` prints a snippet with the current
-absolute script paths already escaped (Windows backslashes included) — merge it into
-`~/.claude/settings.json` (global) or your project's `.claude/settings.json`. Or edit
-[`examples/claude/settings.example.json`](./examples/claude/settings.example.json) by hand.
-Restart Claude Code.
-
-Two hooks: `PreToolUse` (approval) + `Stop` (done notification), with `"matcher": "*"` for the
-autopilot setup described below.
-
-### Step 3 — Wire up Codex
-
-**Lazy way**: `python watch_approve.py --print-codex-config` prints a ready snippet — save it as
-`~/.codex/hooks.json`. Or edit [`examples/codex/hooks.example.json`](./examples/codex/hooks.example.json) by hand.
-
-**Three Codex-specific gotchas (all learned the hard way):**
-
-1. **Approval hangs off the `PermissionRequest` event, not `PreToolUse`.** Codex fires it exactly when
-   it would ask you for approval (escalation / sandbox escape / network…); the hook answers allow/deny,
-   and answering nothing falls back to the normal terminal prompt — exactly the semantics a remote
-   approval needs. (Current Codex also supports allow/deny on `PreToolUse`, which is fine for
-   logging/policy checks, but it doesn't correspond to "Codex wants to ask you" — and older builds
-   didn't intercept the unified shell channel there — so don't make it this project's approval path.)
-2. **Hooks must be reviewed & trusted before they run, and re-trusted after every edit** — otherwise
-   they are **silently skipped** with no error. In the Codex TUI run **`/hooks`**, review and trust both entries.
-3. **`codex exec` (non-interactive) never fires `PermissionRequest`** (its approval policy is `never`).
-   Test approvals in an interactive session; the `Stop` hook does fire under exec.
-
-### Step 4 — Self-check, then smoke-test without the agent
-
-```bash
-# One-shot checkup: placeholders, Pushcut key/devices/notification, ntfy round-trip + a test push
-python ~/watch-hooks/watch_approve.py --doctor
-```
-
-macOS / Linux (bash/zsh):
-
-```bash
-# Claude style (PreToolUse):
-echo '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/x"}}' \
-  | python ~/watch-hooks/watch_approve.py
-
-# Codex style (PermissionRequest):
-echo '{"hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"git push --force"}}' \
-  | python ~/watch-hooks/watch_approve.py --agent codex
-
-# Done notification:
-python ~/watch-hooks/watch_done.py < /dev/null
-```
-
-Windows (PowerShell) — use here-strings so quotes survive (keep non-ASCII out of the pipe;
-PowerShell 5.1 mangles its encoding, see Troubleshooting):
+### 1. Clone and verify
 
 ```powershell
-@'
-{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/x"}}
-'@ | python C:\Users\you\watch-hooks\watch_approve.py
-
-@'
-{"hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"git push --force"}}
-'@ | python C:\Users\you\watch-hooks\watch_approve.py --agent codex
-
-'' | python C:\Users\you\watch-hooks\watch_done.py   # done notification
+git clone https://github.com/wanlixing-dream/Pocket-Codex.git
+cd Pocket-Codex
+python --version
+codex --version
 ```
 
-Tap **✅ Allow** on the watch: the first command prints `permissionDecision: "allow"`, the second prints
-`decision: {"behavior": "allow"}` — the script switches output format automatically per event.
+Make sure Codex CLI is signed in and can run a task locally.
 
-> ⚠️ With danger-only enabled (the recommended default), test with a **risky** command — a plain
-> `echo hello` won't notify by design.
+### 2. Start PocketCodex
 
-## Autopilot mode (optional upgrade)
-
-`watch.env.example` ships in **safe mode**: danger goes to the watch, everything else falls back to
-the agent's own normal approval (`WATCH_DANGER_ONLY=1` + non-danger `ask`). To upgrade to
-"**only danger interrupts me, everything else just runs**", uncomment one line in the example:
-
-```
-WATCH_DANGER_ONLY=1            # only danger-list matches go to the watch
-WATCH_NONDANGER_DECISION=allow # everything else is approved silently ← uncomment for autopilot
+```powershell
+python .\remote_codex_server.py
 ```
 
-Combined with Claude Code's `"matcher": "*"`, **every** tool call routes through the hook: non-risky
-ones (reads, searches, MCP calls…) pass silently, only real danger buzzes your wrist. Why not a narrow
-matcher? A whitelist always misses the next new tool (`WebSearch`, new MCP tools…), and missed tools
-fall back to the **terminal** prompt your watch will never see.
+The server listens only on `http://127.0.0.1:8765` by default. On first start it creates a private `remote.env` containing a random access token. Open the printed local URL on the desktop first and confirm that the session list loads.
 
-The built-in danger list flags `rm -rf`, `sudo`, `git push --force`, `git reset --hard`, `dd`, `mkfs`,
-`chmod 777`, `shutdown`, `kill`, `DROP/TRUNCATE TABLE`, `DELETE FROM`, `curl | sh`, `docker rm/prune`,
-`terraform destroy`, `kubectl delete`, PowerShell `Remove-Item -Recurse -Force`, and more.
-Extend with `WATCH_DANGER_EXTRA`, or replace wholesale with `WATCH_DANGER_REGEX`.
+> [!WARNING]
+> Never commit, screenshot, or publicly share `remote.env`. Anyone with its token may be able to send instructions to your local Codex sessions.
 
-> ⚠️ Understand the trade-off: with `allow`, anything the danger list does **not** catch runs without
-> confirmation. The danger regex is your only gate — review and extend it.
+### 3. Connect with Cloudflare Quick Tunnel (default)
 
-**The watch shows a human-readable verdict, not raw commands** — a category label plus the target's
-basename, e.g. `🗑️ delete folder: node_modules`, `⚠️ git force push: main`, `📝 edit files: app.py, readme.md`.
+Install `cloudflared`, keep PocketCodex running, and start a second PowerShell:
 
-**Anti-tamper:** the scripts' own folder is **protected by default** (`WATCH_PROTECT_SELF=1`,
-normalized absolute-path comparison): any *write* to `watch_approve.py` / `watch.env` is itself
-forced onto the watch (🛡️) — the agent can't quietly edit your gate away. Add more paths with
-`WATCH_PROTECT_PATHS` (substring match). Known edge: shell redirection (`echo x > script`)
-bypasses this rule, though the danger list still catches most destructive write commands.
-
-## Usage-limit alerts (a must for subscription plans)
-
-Both Claude Code and Codex subscriptions have usage windows — when they run dry your task silently
-dies while you're away. That's now on your wrist too, via two different mechanisms (both verified):
-
-- **Claude**: hangs off the official **`StopFailure`** hook (runs *instead of* Stop when a turn ends
-  on an API error). Limit errors (`error=rate_limit`) → "**🚦 Claude quota exhausted**" with the reset
-  time extracted from the error text (e.g. `resets 1:10am`); other API errors → "**⚠️ turn failed**"
-  with the error type.
-- **Codex**: a turn that dies on a usage-limit error runs **no hooks at all** (confirmed in source —
-  the error path breaks before stop hooks), so instead you get an **early warning**: at every normal
-  turn end the script reads Codex's own quota telemetry (`rate_limits` in the rollout, with
-  `used_percent` and reset time). At ≥ `WATCH_LIMIT_WARN_PCT` (default **90%**) the done notification
-  becomes "**⚠️ Codex quota at NN%**" + reset time — you're warned *before* it burns out.
-- These alerts use a distinct sound (`WATCH_LIMIT_SOUND`, default `problem`) so your ear can tell
-  them from normal done pings.
-
-Wiring: for Claude add a `StopFailure` block to your settings hooks (the example includes it);
-Codex needs nothing extra (it rides the existing Stop hook).
-
-## Multi-window / parallel sessions
-
-Running several Claude Code / Codex windows at once? Two things are built in:
-
-- **No cross-talk** — ntfy is pub/sub: with a single shared topic, tapping ✅ on window A's notification would also release window B, which is waiting on the same topic. So every approval uses its **own reply topic** (base topic + random suffix); each notification's buttons resolve only their own request, and a late tap on an expired notification can't accidentally approve a newer one. (Device-tested: two windows waiting concurrently, two taps resolved independently.)
-- **Know who's asking** — approval and done notifications end with a "📁 project folder" line.
-
-Opt out with `WATCH_UNIQUE_TOPIC=0` (shared topic) and `WATCH_SHOW_CWD=0` (no 📁 line).
-Note: app-configured static actions (`PUSHCUT_DYNAMIC_ACTIONS=0`) point at a fixed topic and can only share it — use the default dynamic actions for multi-window.
-
-## Terminal decision prompts, answered from the watch
-
-Sometimes Claude isn't asking for permission but for a **decision** — the `AskUserQuestion`
-multiple-choice prompt rendered in the terminal. Away from the keyboard, that prompt just sits
-there. Now it reaches your watch too (title "🤔 Claude 在问你"):
-
-- Body = the question plus an `A. / B. / C.` option digest; buttons are kept short —
-  **方案A / 方案B / …** (option codes; full text is in the body) plus **🖥️ answer in terminal**;
-- Tap an option → the answer goes back through the official `updatedInput.answers` channel
-  (a real answer, not a prompt nudge) and Claude continues with it — no terminal prompt at all;
-- Tap "answer in terminal" (you're at the desk anyway) or let it time out → the prompt renders
-  in the terminal as usual, nothing is lost;
-- **Multi-question or multi-select prompts** don't fit on a watch face → you get a heads-up
-  notification and the prompt falls through to the terminal.
-
-Set `WATCH_ASK_QUESTIONS=0` to disable (back to terminal-only prompts). The ✅/❌ approval
-flow is unchanged.
-
-## Per-agent look
-
-One script serves both agents (switch via `--agent codex` or `WATCH_AGENT=codex`):
-
-| | Title | Image (transparent banner via jsDelivr CDN) |
-|---|---|---|
-| **Claude Code** | 🦀 Claude pending approval / task done | Official pixel crab **Clawd**, animated GIF |
-| **Codex** | 🤖 Codex pending approval / task done | GPT knot-cat (`assets/gpt-cat.png`; official knot logo `gpt-logo.png` also included) |
-
-Override with `PUSHCUT_IMAGE=<url>` (applies to both agents), or `none` to drop the image.
-
-## Configuration reference (env vars / watch.env)
-
-**Core**
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PUSHCUT_KEY` | — | **Required (pushcut transport).** Pushcut API key |
-| `NTFY_TOPIC` | — | **Required.** Return-channel topic (acts as the password) |
-| `PUSHCUT_NOTIF` | `claude` | Name of the Pushcut notification to trigger |
-| `WATCH_TRANSPORT` | `pushcut` | Notification transport: `pushcut` (Apple) / `ntfy` (Android/Wear OS, see "Beyond Apple") |
-| `NTFY_NOTIFY_TOPIC` | — | **Required (ntfy transport).** Notify-channel topic the phone app subscribes to |
-| `NTFY_TOKEN` | — | Token for self-hosted ntfy with auth (publish/subscribe/buttons all carry it) |
-| `HTTPS_PROXY` | — | Outbound proxy, e.g. `http://127.0.0.1:7890` (falls back to `HTTP_PROXY`) |
-| `WATCH_AGENT` | `claude` | `claude` / `codex`; the `--agent` CLI flag wins over this |
-| `WATCH_ENV_FILE` | `watch.env` next to the script | Fallback config file path |
-
-**Delivery (the three things that make the watch actually buzz)**
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PUSHCUT_DEVICES` | (all devices) | **Recommend `iPhone,watch`** — target the watch directly, bypassing iOS mirroring rules (names via Pushcut `GET /v1/devices`) |
-| `PUSHCUT_SOUND` | `default` | **No sound = no vibration on the watch!** `vibrateOnly` = buzz without sound, `none` = silent |
-| `PUSHCUT_TIME_SENSITIVE` | `1` | Time-Sensitive alert: reaches the **watch even while the iPhone is in use**, and breaks through Focus/DND (the single most effective lever, A/B-tested) |
-
-**Approval behavior**
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `APPROVE_WAIT` | `240` | Seconds to wait for the tap (keep below the hook timeout of 300) |
-| `APPROVE_TIMEOUT_DECISION` | `ask` | If nobody answers: `ask` (defer to terminal) / `allow` / `deny` |
-| `WATCH_RENOTIFY_INTERVAL` | `120` | While waiting, re-send the same notification every N seconds (tapping any copy works) so it's harder to miss; `0` = send once |
-| `WATCH_MISSED_ALERT` | `1` | On timeout with no answer, push a button-less "⏰ you missed one" reminder before deferring to the terminal; `0` = off |
-| `WATCH_MISSED_TITLE` / `WATCH_MISSED_SOUND` | `⏰ 你错过了待处理` / approval sound | Title / sound for that reminder |
-| `WATCH_DANGER_ONLY` | `0` | `1` = only risky operations go to the watch |
-| `WATCH_NONDANGER_DECISION` | `ask` | In danger-only mode, non-risky ops: `ask` / `allow` / `deny` |
-| `WATCH_DANGER_EXTRA` | — | Extra danger regexes (newline-separated) |
-| `WATCH_DANGER_REGEX` | — | Replace the built-in danger list entirely |
-| `WATCH_PROTECT_SELF` | `1` | Protect the scripts' own folder: writes to it are forced onto the watch; `0` = off |
-| `WATCH_PROTECT_PATHS` | — | Extra protection: comma-separated substrings; write-tool hits are forced onto the watch |
-| `WATCH_TERMINAL_BUTTON` | `1` | Third approval button "🖥️ view in terminal" (defers to the terminal prompt); `0` = ✅/❌ only |
-| `WATCH_SHOW_RAW` | `0` | `1` = append the raw command / full path on its own line |
-| `WATCH_RAW_MAX` | `160` | Truncation length for the raw detail line |
-| `WATCH_DESC_MAX` | `80` | Max body length (watch screens are small) |
-| `WATCH_UNIQUE_TOPIC` | `1` | Per-request reply topic (base topic + random suffix) so parallel windows never cross-talk; `0` = shared |
-| `WATCH_SHOW_CWD` | `1` | Append "📁 project folder" to notification bodies to tell windows apart; `0` = off |
-| `WATCH_ASK_QUESTIONS` | `1` | Send Claude's multiple-choice prompts (AskUserQuestion) to the watch; `0` = terminal only |
-| `WATCH_QUESTION_TITLE` | `🤔 Claude 在问你` | Title for question notifications |
-| `WATCH_QUESTION_SOUND` | `question` | Sound for question notifications (distinct from approvals) |
-
-**Look & done-notification**
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PUSHCUT_IMAGE` | per-agent preset | Notification image URL; `none` to disable |
-| `WATCH_DONE_TITLE` / `WATCH_DONE_TEXT` | per-agent preset | Done-notification title/body |
-| `WATCH_DONE_SOUND` | `jobDone` | Done-notification sound |
-| `WATCH_LIMIT_WARN_PCT` | `90` | (Codex) quota warning threshold in %, checked at each turn end; `0` = off |
-| `WATCH_LIMIT_SOUND` | `problem` | Sound for limit/failure alerts |
-
-**Network & debugging**
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PUSHCUT_RETRIES` | approve `12` / done `8` | Retries for triggering Pushcut (flaky TLS through proxies) |
-| `PUSHCUT_TIMEOUT` | approve `3` / done `6` | Per-attempt timeout (s); shorter = fail fast onto a fresh retry |
-| `NTFY_BASE` | `https://ntfy.sh/` | Change when self-hosting ntfy. Note: the watch buttons are header-less GETs sent by Pushcut's cloud, so the topic must allow anonymous read/write |
-| `PUSHCUT_DYNAMIC_ACTIONS` | `1` | `1` = hook injects buttons (Pro); `0` = use app-configured actions |
-| `WATCH_DEBUG_DUMP` | `0` | `1` = dump each hook's raw stdin to `%TEMP%/watch_*_last_input_<agent>.json` |
-
-## Apple Watch field notes (all device-tested)
-
-- **Time-Sensitive is what reliably reaches the watch.** A normal alert only mirrors to the watch while
-  the iPhone is locked; in use, iOS keeps it on the phone. A/B test: of two otherwise-identical alerts,
-  only the Time-Sensitive one reached the watch. Enabled by default; also set `PUSHCUT_DEVICES=iPhone,watch`.
-- **Buttons must be background web requests** (this hook complies) — watchOS rejects "open app / run shortcut" actions.
-- **Set a sound** or the watch won't vibrate.
-- **If a device suddenly stops receiving, reopen the Pushcut app on it.** A killed/backgrounded app's
-  push token goes stale: Pushcut keeps returning "success" while nothing arrives. Reopening re-registers it.
-- The watch shows only a static frame of animated GIFs (watchOS limitation); the iPhone's expanded
-  notification plays the animation.
-
-## 📱 Beyond Apple: Android / Wear OS / HarmonyOS
-
-The only Apple-specific piece in the chain is Pushcut. On Android its role is played by
-**ntfy itself** — the official ntfy Android app natively supports "http" notification actions
-(background GET), the exact equivalent of Pushcut's background web request. One service does
-everything, no second account:
-
-```
-hook → publish to a ntfy notify topic (with buttons) → phone notification → tap = background GET to the reply topic → hook hears it
+```powershell
+cloudflared tunnel --url http://127.0.0.1:8765
 ```
 
-### Android setup (3 steps)
+Open the generated URL on the phone and append the token once:
 
-1. Install the **ntfy app** ([Google Play](https://play.google.com/store/apps/details?id=io.heckel.ntfy) /
-   [F-Droid](https://f-droid.org/packages/io.heckel.ntfy/) — the F-Droid build uses a direct
-   WebSocket connection, **no Google services required**, ideal for GMS-free phones);
-2. Add two lines to `watch.env` (all `PUSHCUT_*` vars become unnecessary):
-   ```
-   WATCH_TRANSPORT=ntfy
-   NTFY_NOTIFY_TOPIC=<another long random string, different from NTFY_TOPIC>
-   ```
-3. Subscribe to `NTFY_NOTIFY_TOPIC` in the app, then run `python watch_approve.py --doctor`
-   (it sends a test notification to your phone).
+```text
+https://random-name.trycloudflare.com/#token=YOUR_REMOTE_CODEX_TOKEN
+```
 
-**Two must-dos**: enable **instant delivery** in the app (foreground service), and whitelist
-ntfy in battery settings — aggressive ROMs (Huawei/Xiaomi/OPPO) kill background apps, which is
-the Android equivalent of Pushcut's stale-token trap. Sound/vibration are configured per topic
-inside the app (approvals are published at urgent priority: pops over the lock screen with
-repeated vibration).
+The web client stores the token in that browser and removes the fragment from the address bar. Quick Tunnel URLs are public and normally change after cloudflared restarts, so never share the complete URL in chats, issues, or screenshots.
 
-### Watches & HarmonyOS
+#### Windows startup, tunnel recovery, and ntfy link updates
 
-| Device | Support |
-|--------|---------|
-| **Wear OS** (Pixel/Galaxy/OPPO Watch…) | ✅ phone notifications mirror to the watch **with buttons** — approve from the wrist |
-| **HarmonyOS ≤4.x** (Android-compatible) | ✅ sideload the F-Droid ntfy build, same as above |
-| **Huawei watches** (GT/Watch series) | ⚠️ text-only mirroring, buttons don't carry over — see on watch, approve on phone |
-| **HarmonyOS NEXT** (no Android apps) | ❌ no ntfy client. Fallback: push approvals as a **WeChat message** (e.g. via ServerChan) whose body contains two links to the ntfy `/publish?message=allow\|deny` GET URLs — opening a link completes the approval. Native app PRs welcome |
+`start_remote_codex.ps1` is a Windows helper that starts the local server and Quick Tunnel. If Cloudflare has reclaimed the temporary tunnel, the script replaces it. When `NTFY_NOTIFY_TOPIC` is configured in `watch.env`, an address change sends a `Codex Remote - NEW LINK` ntfy notification containing the full URL and an `OPEN CODEX` button.
 
-### ntfy-transport differences
+After installing `cloudflared` and configuring ntfy as described in [Notifications and approvals](./docs/NOTIFICATIONS.md), run:
 
-- **3-button limit** (ntfy protocol): approval's Allow/Deny/view-in-terminal fits exactly;
-  for choice questions, 2 options keep the "view in terminal" button, 3 options drop it
-  (timeout still falls back to the terminal), 4 options fall back to a heads-up + terminal;
-- **Self-hosted ntfy with auth is fully supported** (stronger than the Apple side): with
-  `NTFY_TOKEN` set, publish / subscribe / button callbacks all carry `Authorization: Bearer`,
-  and the app supports authenticated subscriptions — something Pushcut buttons cannot do;
-- The image rides along as a ntfy attachment; `PUSHCUT_SOUND` / `PUSHCUT_DEVICES` /
-  Time-Sensitive are Apple-side concepts and are ignored on this transport.
+```powershell
+.\start_remote_codex.ps1
+```
 
-## Troubleshooting
+Cloudflare may reclaim a Quick Tunnel while its process is still alive. For continuous use, install the current-user watchdog that runs every five minutes, also on battery power, and only notifies when the URL changes:
 
-| Symptom | Cause / fix |
-|---------|-------------|
-| **Anything's off / first run** | Run `python watch_approve.py --doctor` first: it checks most of this table automatically and sends a test notification |
-| Pushcut HTTP 404 | No notification named `PUSHCUT_NOTIF` in the cloud (create it; make sure the app synced) |
-| Pushcut HTTP 400 | Usually a `PUSHCUT_DEVICES` name that doesn't match your account's devices (`--doctor` lists the real names) |
-| Pushcut HTTP 401/403 | Wrong `PUSHCUT_KEY` |
-| Send succeeds but **no device** receives | Stale push token → **reopen the Pushcut app on the iPhone**. "Success" = cloud accepted, not device delivered |
-| Phone gets it, watch doesn't | Keep `PUSHCUT_TIME_SENSITIVE=1` + target the watch via `PUSHCUT_DEVICES`; check the watch app is installed and Time-Sensitive is allowed |
-| Claude still prompts in the terminal | Tool not covered by your matcher → use `"matcher": "*"` + danger-only + `allow` |
-| **Codex hooks never fire** | ① Not trusted / edited without re-trusting → run `/hooks` in the Codex TUI and trust both (skipping is **silent**); ② you tested with `codex exec` → it never fires `PermissionRequest`, use an interactive session; ③ inspect input with `WATCH_DEBUG_DUMP=1` |
-| Codex hook can't see your key/proxy | Codex doesn't pass env to hooks → use **`watch.env`** next to the scripts (built into this repo) |
-| Tapping says "not supported" on the watch | The action isn't a background web request (default config already is) |
-| No vibration | `PUSHCUT_SOUND=default` (or `vibrateOnly`) |
-| Chinese/emoji shows as `???` in Windows manual tests | PowerShell pipe encoding artifact, not the hook; real runs are unaffected. Feed JSON from a UTF-8 file or env vars when testing |
-| One tap releases every waiting window | Upgrade to a version with `WATCH_UNIQUE_TOPIC` (on by default); static-action mode (`PUSHCUT_DYNAMIC_ACTIONS=0`) can't isolate — use dynamic actions for multi-window |
-| (Android) ntfy notifications missing/late | Enable instant delivery + whitelist ntfy in battery settings (aggressive ROMs kill it); make sure you subscribed to `NTFY_NOTIFY_TOPIC`, not the reply topic |
-| (Android) question buttons missing | ntfy caps notifications at 3 actions: with 3 options the "view in terminal" button is dropped (timeout still falls back), 4 options fall back to the terminal entirely — by design |
-| Question notification has no "方案X" buttons | Multi-question / multi-select prompts fall back to the terminal by design (the watch only gets a heads-up); only single-question single-select prompts get option buttons. Disable the whole feature with `WATCH_ASK_QUESTIONS=0` |
+```powershell
+.\start_remote_codex.ps1 -InstallWatchdog
+```
 
-Every failure path returns "fall back to normal approval" — the agent never hangs because of this hook.
+To disable remote access, remove the watchdog before stopping cloudflared and PocketCodex so it cannot restart them:
+
+```powershell
+.\start_remote_codex.ps1 -RemoveWatchdog
+```
+
+### 4. Tailscale Serve (private-network alternative)
+
+Tailscale adds device identity and tailnet ACLs. Use it when it is available and you prefer a stable private address:
+
+```powershell
+tailscale serve --bg http://127.0.0.1:8765
+tailscale serve status
+```
+
+Open the reported HTTPS URL and append the token on first use:
+
+```text
+https://your-device.your-tailnet.ts.net/#token=YOUR_REMOTE_CODEX_TOKEN
+```
+
+Stop sharing with `tailscale serve reset`.
+
+### 5. Use the mobile client
+
+1. Select an item from Recent Sessions.
+2. Enter a prompt and optionally attach up to four images.
+3. Send it to run `codex exec resume` on the desktop.
+4. Use the `+` button to choose a folder and create a new session.
+5. Watch the run state, inspect output, or stop the process.
+
+## Allowed project roots
+
+The new-session folder picker only exposes `Desktop` and `Documents` by default. This is an explicit allowlist, not a refresh problem.
+
+Complete one first start so PocketCodex generates a secure token, then add `REMOTE_CODEX_ROOTS` to `remote.env`. Separate Windows paths with semicolons:
+
+```dotenv
+REMOTE_CODEX_ROOTS=C:\Users\you\Desktop;C:\Users\you\source;D:\Projects
+```
+
+Use colons on macOS/Linux:
+
+```dotenv
+REMOTE_CODEX_ROOTS=/Users/you/Desktop:/Users/you/Projects
+```
+
+Restart PocketCodex after changing the setting. The allowlist controls where a new session may start; it is not a filesystem sandbox for Codex and does not restrict existing sessions.
+
+## Configuration
+
+Start from [`remote.env.example`](./remote.env.example), or let PocketCodex create `remote.env` automatically:
+
+```dotenv
+# At least 24 characters. A long random value is recommended.
+REMOTE_CODEX_TOKEN=replace-with-a-long-random-token
+
+# Optional roots for new sessions.
+REMOTE_CODEX_ROOTS=C:\Users\you\Desktop;D:\Projects
+```
+
+The real `remote.env` is excluded by `.gitignore`.
+
+## Optional notifications and approvals
+
+The hook scripts are optional and are not required for mobile session control:
+
+- `watch_done.py` sends completion, failure, and usage-limit notifications.
+- `watch_approve.py` forwards supported interactive Codex or Claude Code approvals to a phone or watch.
+- ntfy supports phone and Wear OS notifications.
+- Pushcut can provide richer iPhone and Apple Watch actions.
+
+PocketCodex remote runs use non-interactive `codex exec`; do not treat watch approval as a guaranteed protection layer for those runs. See [Notifications and approvals](./docs/NOTIFICATIONS.md).
 
 ## Security
 
-- Secrets are read from env vars / `watch.env` only; `.gitignore` excludes `*.env` — never commit real config.
-- On public ntfy.sh the topic name is the only guard on the return channel → long random value
-  (each approval additionally gets a random per-request suffix). Self-hosting via `NTFY_BASE` works,
-  but the watch buttons are header-less GETs from Pushcut's cloud and can't carry Authorization —
-  either allow anonymous read/write on the topic, or stay on public ntfy.sh + a long random topic.
-- `WATCH_NONDANGER_DECISION=allow` delegates non-risky approval to the danger regex — review it before enabling.
-- The scripts' own folder is protected by default (`WATCH_PROTECT_SELF=1`): agent writes to it always
-  go to the watch. Add more paths with `WATCH_PROTECT_PATHS`.
+PocketCodex can start Codex on your machine and should be treated as a remote administration endpoint:
+
+- Keep the server bound to `127.0.0.1`; do not expose `0.0.0.0` directly.
+- The default Quick Tunnel is a public endpoint. Treat the complete tokenized URL as a password.
+- When Tailscale is available, its device identity and ACLs provide an additional private-network layer.
+- Do not share URLs containing `#token=` or `?token=`.
+- Rotate the token and reset the tunnel if a URL or token may have leaked.
+- Allow only project roots that you genuinely need remotely.
+- `REMOTE_CODEX_ROOTS` limits the new-session picker only. Codex permissions are still governed by its sandbox, approval policy, and the desktop user account.
+- A valid client can read recent prompt/response metadata and send new instructions.
+- When remote access is not in use, remove `RemoteCodexWatchdog` before stopping cloudflared and PocketCodex; Quick Tunnel is not a private network.
+
+## Current limitations
+
+- This is a CLI session companion, not a live mirror of Codex desktop or TUI windows.
+- Only one PocketCodex run may be active for a given session.
+- The server lists the 30 most recent sessions by default.
+- Prompts are limited to 20,000 characters.
+- Each request accepts up to four JPEG/PNG/WebP images, 8 MB each.
+- Runs time out after six hours and retain the final 30,000 output characters in memory.
+- A folder level shows at most 250 non-hidden subdirectories.
+- Run state is in memory and is lost when the service restarts.
+- `start_remote_codex.ps1` is a Windows + cloudflared + ntfy helper that can install or remove `RemoteCodexWatchdog`; use the manual commands above for a portable installation.
+
+## Project layout
+
+```text
+Pocket-Codex/
+├── remote_codex_server.py   # API, authentication, session parsing, process management
+├── remote_web/              # Mobile HTML/CSS/JavaScript client
+├── start_remote_codex.ps1   # Windows Quick Tunnel helper
+├── watch_approve.py         # Optional approval hook
+├── watch_done.py            # Optional completion/failure hook
+├── examples/                # Codex and Claude Code hook examples
+├── docs/                    # Architecture and optional feature guides
+└── tests/                   # Standard-library unittest suite
+```
+
+## Development
+
+```powershell
+python -m unittest discover -s tests -v
+python -m py_compile remote_codex_server.py watch_approve.py watch_done.py
+```
+
+CI runs without network access on Windows, macOS, and Linux.
+
+## Troubleshooting
+
+| Symptom | Check |
+| --- | --- |
+| The phone shows `Unauthorized` | Reopen a URL with the current `#token=`; after rotation, clear this site's browser storage |
+| Projects outside Desktop/Documents are missing | Add `REMOTE_CODEX_ROOTS` to the generated `remote.env`, then restart the server |
+| The session list is empty | Complete at least one desktop Codex CLI session and verify that `~/.codex/sessions` exists |
+| The phone cannot connect | Verify that the Python server is running, then inspect `tailscale serve status` or the cloudflared console |
+| `codex` is not found | Install/sign in to Codex CLI and ensure it is on the current user's `PATH` |
+| A remote run hits a permission error | Inspect the desktop Codex sandbox/approval configuration; non-interactive `exec` is not the TUI approval flow |
+
+Contributions are welcome. Changes involving authentication, filesystem access, or command execution should document their threat model and verification evidence.
 
 ## License
 
-MIT — see [LICENSE](./LICENSE). Art: the crab is Claude Code's official mascot Clawd; the GPT knot-cat is a derivative image made for this repo.
+[MIT](./LICENSE)
