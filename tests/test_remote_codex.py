@@ -37,6 +37,28 @@ class TokenFileTests(unittest.TestCase):
 
             self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
 
+    @unittest.skipIf(os.name == "nt", "POSIX permission bits are not available on Windows")
+    def test_ensure_token_uses_restrictive_create_mode(self):
+        with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {}, clear=True):
+            path = Path(temp) / "remote.env"
+
+            with patch.object(remote.os, "open", wraps=os.open) as opener:
+                remote.ensure_token(path)
+
+            opener.assert_called_once()
+            self.assertTrue(opener.call_args.args[1] & os.O_CREAT)
+            self.assertEqual(opener.call_args.args[2], 0o600)
+
+    @unittest.skipIf(os.name == "nt", "POSIX permission bits are not available on Windows")
+    def test_ensure_token_fails_closed_when_permissions_cannot_be_restricted(self):
+        with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {}, clear=True):
+            path = Path(temp) / "remote.env"
+            path.write_text("REMOTE_CODEX_TOKEN=" + "a" * 32 + "\n", encoding="ascii")
+
+            with patch.object(remote.Path, "chmod", side_effect=OSError("denied")):
+                with self.assertRaises(PermissionError):
+                    remote.ensure_token(path)
+
 
 class SessionStoreTests(unittest.TestCase):
     def test_lists_session_with_human_prompts_and_ignores_injected_context(self):

@@ -32,8 +32,8 @@ def restrict_private_file(path: Path) -> None:
         return
     try:
         path.chmod(0o600)
-    except OSError:
-        pass
+    except OSError as exc:
+        raise PermissionError(f"Cannot restrict private file permissions: {path}") from exc
 
 
 def default_runtime_dir() -> Path:
