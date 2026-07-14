@@ -147,6 +147,22 @@ python3 start_remote_codex.py
 
 The helper waits until both services are ready, prints the private phone URL, and stays in the foreground. Closing that terminal or pressing `Ctrl+C` stops the processes started by the helper.
 
+To receive a fresh phone link automatically whenever the Quick Tunnel URL changes:
+
+1. Subscribe to a long, unguessable topic in the ntfy phone app.
+2. Copy `watch.env.example` to the ignored local file `watch.env`.
+3. Configure at least:
+
+```dotenv
+WATCH_TRANSPORT=ntfy
+NTFY_NOTIFY_TOPIC=your-long-random-topic
+NTFY_BASE=https://ntfy.sh
+```
+
+4. Run `python3 start_remote_codex.py` on macOS/Linux or `python .\start_remote_codex.py` on Windows.
+
+The helper waits until the public URL is actually reachable, then sends a clickable ntfy notification. It does not resend an unchanged URL. An ntfy outage only writes a warning and does not stop PocketCodex or cloudflared. See [Notifications and approvals](./docs/NOTIFICATIONS.md#quick-tunnel-新链接通知) for details.
+
 If the phone shows Cloudflare `Error 1016 Origin DNS error` after refreshing, the old `*.trycloudflare.com` quick-tunnel hostname has usually expired or cloudflared stopped on the desktop. Start the helper again, or rerun `cloudflared tunnel --url http://127.0.0.1:8765`, then open the new URL.
 
 ### 4. Tailscale Serve (private-network alternative)
@@ -289,6 +305,7 @@ Core unit tests run without network access; desktop discovery covers Windows and
 | Projects outside Desktop/Documents are missing | Add `REMOTE_CODEX_ROOTS` to the generated `remote.env`, then restart the server |
 | The task list is empty | Complete at least one task in the Codex/ChatGPT desktop app under the same OS user |
 | The phone cannot connect | Verify that the Python server is running, then inspect `tailscale serve status` or the cloudflared console |
+| No fresh ntfy link arrives | Confirm that the phone subscribes to `NTFY_NOTIFY_TOPIC`, inspect `notify-error.log` in the runtime directory, and verify that the URL actually changed |
 | Desktop app-server cannot be found | Windows: install and launch Codex from Microsoft Store. macOS: install and launch ChatGPT/Codex. You can also set `REMOTE_CODEX_DESKTOP_EXE` to the bundled `codex`/`codex.exe` |
 | A remote run needs approval | Return to the Codex desktop app; PocketCodex never auto-approves unsupported sensitive actions |
 
