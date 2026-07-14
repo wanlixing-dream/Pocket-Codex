@@ -60,16 +60,21 @@ def restrict_private_file(path: Path) -> None:
 
 
 def write_private_file(path: Path, content: str) -> None:
-    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    temporary = path.with_name(f".{path.name}.{secrets.token_hex(8)}.tmp")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = -1
     try:
+        descriptor = os.open(temporary, flags, 0o600)
         if os.name != "nt":
             os.fchmod(descriptor, 0o600)
         with os.fdopen(descriptor, "w", encoding="ascii") as handle:
             descriptor = -1
             handle.write(content)
+        os.replace(temporary, path)
     finally:
         if descriptor >= 0:
             os.close(descriptor)
+        temporary.unlink(missing_ok=True)
 
 
 def _cache_macos_executable(source: Path) -> Path:

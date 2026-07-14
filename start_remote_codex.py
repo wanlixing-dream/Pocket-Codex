@@ -152,8 +152,8 @@ def notify_mobile_url(
         return False
 
 
-def server_ready(token: str, timeout: float = 2.0) -> bool:
-    request = Request(f"{LOCAL_URL}/api/sessions", headers={"X-Remote-Codex-Token": token})
+def server_ready(timeout: float = 2.0) -> bool:
+    request = Request(f"{LOCAL_URL}/health")
     try:
         with urlopen(request, timeout=timeout) as response:
             return 200 <= response.status < 500
@@ -207,7 +207,7 @@ def wait_for_server(env_path: Path, timeout: float) -> str:
     deadline = time.time() + timeout
     token = wait_for_token(env_path, deadline)
     while time.time() < deadline:
-        if server_ready(token):
+        if server_ready():
             return token
         time.sleep(0.5)
     raise TimeoutError(f"PocketCodex did not become ready at {LOCAL_URL}.")
@@ -250,7 +250,7 @@ def start_processes(args: argparse.Namespace) -> tuple[list[subprocess.Popen[str
     started: list[subprocess.Popen[str]] = []
     token = parse_env_file(env_path).get("REMOTE_CODEX_TOKEN", "")
 
-    if token and server_ready(token):
+    if token and server_ready():
         print(f"PocketCodex is already running at {LOCAL_URL}")
     else:
         server_log = runtime_dir / "server.log"

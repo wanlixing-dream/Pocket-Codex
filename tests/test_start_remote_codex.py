@@ -72,6 +72,18 @@ class StartRemoteCodexTests(unittest.TestCase):
         with patch.object(starter, "urlopen", side_effect=starter.URLError("not ready")):
             self.assertFalse(ready("https://pending.trycloudflare.com", "secret-token"))
 
+    def test_server_ready_uses_lightweight_health_endpoint(self):
+        response = MagicMock()
+        response.status = 200
+        response.__enter__.return_value = response
+
+        with patch.object(starter, "urlopen", return_value=response) as open_url:
+            self.assertTrue(starter.server_ready())
+
+        request = open_url.call_args.args[0]
+        self.assertEqual(request.full_url, "http://127.0.0.1:8765/health")
+        self.assertIsNone(request.get_header("X-remote-codex-token"))
+
     def test_public_url_ready_checks_authenticated_sessions_api(self):
         response = MagicMock()
         response.status = 200

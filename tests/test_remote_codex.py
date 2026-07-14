@@ -47,7 +47,21 @@ class TokenFileTests(unittest.TestCase):
 
             opener.assert_called_once()
             self.assertTrue(opener.call_args.args[1] & os.O_CREAT)
+            self.assertTrue(opener.call_args.args[1] & os.O_EXCL)
             self.assertEqual(opener.call_args.args[2], 0o600)
+
+    @unittest.skipIf(os.name == "nt", "POSIX permission bits are not available on Windows")
+    def test_ensure_token_removes_temporary_file_when_fchmod_fails(self):
+        with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {}, clear=True):
+            path = Path(temp) / "remote.env"
+
+            with patch.object(remote.os, "fchmod", side_effect=OSError("denied")):
+                with self.assertRaises(OSError):
+                    remote.ensure_token(path)
+
+            self.assertFalse(path.exists())
+            self.assertEqual(list(Path(temp).iterdir()), [])
+            self.assertNotIn("REMOTE_CODEX_TOKEN", os.environ)
 
     @unittest.skipIf(os.name == "nt", "POSIX permission bits are not available on Windows")
     def test_ensure_token_fails_closed_when_permissions_cannot_be_restricted(self):

@@ -43,9 +43,9 @@ The user's real settings live only in ignored `watch.env`.
 
 ### Public URL Readiness
 
-After cloudflared prints a Quick Tunnel URL, the helper repeatedly requests the authenticated public sessions API until it returns four consecutive HTTP 200 responses or the existing tunnel timeout expires. Transient DNS failures, Cloudflare `530` responses, and connection errors reset the stability counter and are retried.
+The helper first uses the lightweight local `/health` endpoint to confirm that the HTTP server is listening without forcing an early Codex Desktop app-server initialization. After cloudflared prints a Quick Tunnel URL, it repeatedly requests the authenticated public sessions API until it returns four consecutive HTTP 200 responses or the existing tunnel timeout expires. Transient DNS failures, Cloudflare `530` responses, and connection errors reset the stability counter and are retried.
 
-The private PocketCodex token is not needed for this readiness request because the static root is public.
+The public readiness request sends the private PocketCodex token in the `X-Remote-Codex-Token` header; it is never added to the request URL.
 
 ### ntfy Publisher
 
