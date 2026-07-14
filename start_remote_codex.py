@@ -63,7 +63,9 @@ def mobile_url(public_url: str, token: str) -> str:
 
 def configured_ntfy(settings: dict[str, str]) -> bool:
     topic = settings.get("NTFY_NOTIFY_TOPIC", "").strip()
-    return bool(topic) and "REPLACE_WITH" not in topic.upper()
+    normalized = re.sub(r"[^a-z0-9]+", "-", topic.lower()).strip("-")
+    placeholder_prefixes = ("replace-with-", "your-long-random-topic", "example-")
+    return bool(normalized) and not normalized.startswith(placeholder_prefixes)
 
 
 def build_ntfy_request(settings: dict[str, str], full_url: str) -> Request:
@@ -128,10 +130,10 @@ def notify_mobile_url(
     full_url: str,
     timeout: float = 15.0,
 ) -> bool:
-    settings = parse_env_file(watch_env_path)
-    if not configured_ntfy(settings):
-        return False
     try:
+        settings = parse_env_file(watch_env_path)
+        if not configured_ntfy(settings):
+            return False
         return publish_mobile_url(settings, runtime_dir, full_url, timeout=timeout)
     except Exception as exc:
         with (runtime_dir / "notify-error.log").open("a", encoding="utf-8") as handle:

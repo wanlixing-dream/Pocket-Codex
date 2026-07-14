@@ -68,13 +68,13 @@ class StartRemoteCodexTests(unittest.TestCase):
         full_url = "https://example.trycloudflare.com/#token=fake"
 
         request = build_request(
-            {"NTFY_NOTIFY_TOPIC": "example-topic", "NTFY_BASE": "https://ntfy.sh"},
+            {"NTFY_NOTIFY_TOPIC": "unit-test-topic-73f54d", "NTFY_BASE": "https://ntfy.sh"},
             full_url,
         )
         payload = json.loads(request.data)
 
         self.assertEqual(request.full_url, "https://ntfy.sh/")
-        self.assertEqual(payload["topic"], "example-topic")
+        self.assertEqual(payload["topic"], "unit-test-topic-73f54d")
         self.assertEqual(payload["click"], full_url)
         self.assertEqual(payload["actions"][0]["action"], "view")
         self.assertEqual(payload["actions"][0]["url"], full_url)
@@ -84,7 +84,7 @@ class StartRemoteCodexTests(unittest.TestCase):
         self.assertIsNotNone(build_request)
 
         request = build_request(
-            {"NTFY_NOTIFY_TOPIC": "example-topic", "NTFY_TOKEN": "fake-auth-token"},
+            {"NTFY_NOTIFY_TOPIC": "unit-test-topic-73f54d", "NTFY_TOKEN": "fake-auth-token"},
             "https://example.trycloudflare.com/#token=fake",
         )
 
@@ -95,7 +95,7 @@ class StartRemoteCodexTests(unittest.TestCase):
         self.assertIsNotNone(publish)
         with tempfile.TemporaryDirectory() as temp:
             runtime = Path(temp)
-            settings = {"NTFY_NOTIFY_TOPIC": "example-topic"}
+            settings = {"NTFY_NOTIFY_TOPIC": "unit-test-topic-73f54d"}
             opener = MagicMock()
             opener.open.return_value.__enter__.return_value.status = 200
             full_url = "https://example.trycloudflare.com/#token=fake"
@@ -116,7 +116,7 @@ class StartRemoteCodexTests(unittest.TestCase):
 
             with self.assertRaises(starter.URLError):
                 publish(
-                    {"NTFY_NOTIFY_TOPIC": "example-topic"},
+                    {"NTFY_NOTIFY_TOPIC": "unit-test-topic-73f54d"},
                     runtime,
                     "https://example.trycloudflare.com/#token=fake",
                     opener=opener,
@@ -142,7 +142,7 @@ class StartRemoteCodexTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             runtime = Path(temp)
             watch_env = runtime / "watch.env"
-            watch_env.write_text("NTFY_NOTIFY_TOPIC=example-topic\n", encoding="utf-8")
+            watch_env.write_text("NTFY_NOTIFY_TOPIC=unit-test-topic-73f54d\n", encoding="utf-8")
 
             with patch.object(
                 starter, "publish_mobile_url", side_effect=starter.URLError("secret detail")
@@ -155,6 +155,38 @@ class StartRemoteCodexTests(unittest.TestCase):
             self.assertIn("Warning: ntfy link notification failed", stderr.getvalue())
             self.assertIn("URLError", error_log)
             self.assertNotIn("secret detail", error_log)
+            self.assertNotIn("#token=", error_log)
+
+    def test_configured_ntfy_rejects_documented_placeholders(self):
+        for topic in (
+            "replace-with-phone-subscription-topic",
+            "REPLACE_WITH_ANOTHER_LONG_RANDOM_TOPIC",
+            "your-long-random-topic",
+            "example-topic",
+        ):
+            with self.subTest(topic=topic):
+                self.assertFalse(starter.configured_ntfy({"NTFY_NOTIFY_TOPIC": topic}))
+
+    def test_invalid_watch_env_is_nonfatal_and_sanitized(self):
+        with tempfile.TemporaryDirectory() as temp:
+            runtime = Path(temp)
+            watch_env = runtime / "watch.env"
+            watch_env.write_bytes(b"\xff\xfe")
+
+            with patch.object(starter.sys, "stderr", new_callable=io.StringIO) as stderr:
+                try:
+                    result = starter.notify_mobile_url(
+                        watch_env,
+                        runtime,
+                        "https://example.trycloudflare.com/#token=fake",
+                    )
+                except Exception as exc:
+                    self.fail(f"invalid optional watch.env escaped notify_mobile_url: {type(exc).__name__}")
+
+            self.assertFalse(result)
+            self.assertIn("Warning: ntfy link notification failed", stderr.getvalue())
+            error_log = (runtime / "notify-error.log").read_text(encoding="utf-8")
+            self.assertIn("UnicodeDecodeError", error_log)
             self.assertNotIn("#token=", error_log)
 
     def test_start_processes_verifies_and_notifies_mobile_url(self):
