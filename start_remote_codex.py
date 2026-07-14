@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import queue
 import re
@@ -16,11 +17,12 @@ import time
 from pathlib import Path
 from typing import TextIO
 from urllib.error import URLError
-from urllib.request import Request, urlopen
+from urllib.request import ProxyHandler, Request, build_opener, urlopen
 
 
 ROOT = Path(__file__).resolve().parent
 DEFAULT_ENV = ROOT / "remote.env"
+DEFAULT_WATCH_ENV = ROOT / "watch.env"
 LOCAL_URL = "http://127.0.0.1:8765"
 TRYCLOUDFLARE_RE = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com", re.IGNORECASE)
 
@@ -59,6 +61,85 @@ def mobile_url(public_url: str, token: str) -> str:
     return f"{public_url.rstrip('/')}/#token={token}"
 
 
+def configured_ntfy(settings: dict[str, str]) -> bool:
+    topic = settings.get("NTFY_NOTIFY_TOPIC", "").strip()
+    return bool(topic) and "REPLACE_WITH" not in topic.upper()
+
+
+def build_ntfy_request(settings: dict[str, str], full_url: str) -> Request:
+    base = (settings.get("NTFY_BASE", "").strip() or "https://ntfy.sh").rstrip("/") + "/"
+    payload = {
+        "topic": settings["NTFY_NOTIFY_TOPIC"].strip(),
+        "title": "PocketCodex 新链接",
+        "message": f"点击通知打开新的 PocketCodex 地址。\n{full_url}",
+        "priority": 4,
+        "tags": ["computer", "link"],
+        "click": full_url,
+        "actions": [
+            {
+                "action": "view",
+                "label": "打开 PocketCodex",
+                "url": full_url,
+                "clear": True,
+            }
+        ],
+    }
+    headers = {"Content-Type": "application/json"}
+    token = settings.get("NTFY_TOKEN", "").strip()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return Request(
+        base,
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+
+
+def ntfy_opener(settings: dict[str, str]):
+    proxy = settings.get("HTTPS_PROXY", "").strip()
+    proxies = {"http": proxy, "https": proxy} if proxy else {}
+    return build_opener(ProxyHandler(proxies))
+
+
+def publish_mobile_url(
+    settings: dict[str, str],
+    runtime_dir: Path,
+    full_url: str,
+    opener=None,
+    timeout: float = 15.0,
+) -> bool:
+    if not configured_ntfy(settings):
+        return False
+    notified_path = runtime_dir / "last-notified-url.txt"
+    if notified_path.exists() and notified_path.read_text(encoding="utf-8").strip() == full_url:
+        return False
+    client = opener or ntfy_opener(settings)
+    with client.open(build_ntfy_request(settings, full_url), timeout=timeout) as response:
+        if not 200 <= response.status < 300:
+            raise RuntimeError(f"ntfy returned HTTP {response.status}")
+    notified_path.write_text(full_url + "\n", encoding="utf-8")
+    return True
+
+
+def notify_mobile_url(
+    watch_env_path: Path,
+    runtime_dir: Path,
+    full_url: str,
+    timeout: float = 15.0,
+) -> bool:
+    settings = parse_env_file(watch_env_path)
+    if not configured_ntfy(settings):
+        return False
+    try:
+        return publish_mobile_url(settings, runtime_dir, full_url, timeout=timeout)
+    except Exception as exc:
+        with (runtime_dir / "notify-error.log").open("a", encoding="utf-8") as handle:
+            handle.write(f"{type(exc).__name__}: ntfy link notification failed\n")
+        print("Warning: ntfy link notification failed; PocketCodex is still running.", file=sys.stderr)
+        return False
+
+
 def server_ready(token: str, timeout: float = 2.0) -> bool:
     request = Request(f"{LOCAL_URL}/api/sessions", headers={"X-Remote-Codex-Token": token})
     try:
@@ -66,6 +147,25 @@ def server_ready(token: str, timeout: float = 2.0) -> bool:
             return 200 <= response.status < 500
     except (OSError, URLError):
         return False
+
+
+def public_url_ready(public_url: str, timeout: float = 5.0) -> bool:
+    try:
+        with urlopen(public_url, timeout=timeout) as response:
+            return 200 <= response.status < 400
+    except (OSError, URLError):
+        return False
+
+
+def wait_for_public_url(public_url: str, process: subprocess.Popen[str], timeout: float) -> None:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if process.poll() is not None:
+            raise RuntimeError(f"cloudflared exited early with code {process.returncode}.")
+        if public_url_ready(public_url):
+            return
+        time.sleep(1)
+    raise TimeoutError(f"Cloudflare Quick Tunnel did not become reachable: {public_url}")
 
 
 def wait_for_token(env_path: Path, deadline: float) -> str:
@@ -162,8 +262,15 @@ def start_processes(args: argparse.Namespace) -> tuple[list[subprocess.Popen[str
     threading.Thread(target=stream_process_output, args=(tunnel.stdout, tunnel_log, line_queue), daemon=True).start()
 
     public_url = wait_for_tunnel_url(tunnel, line_queue, args.tunnel_timeout)
+    wait_for_public_url(public_url, tunnel, args.tunnel_timeout)
     full_url = mobile_url(public_url, token)
     (runtime_dir / "remote-url.txt").write_text(full_url + "\n", encoding="utf-8")
+    notify_mobile_url(
+        Path(args.watch_env).expanduser(),
+        runtime_dir,
+        full_url,
+        timeout=args.notify_timeout,
+    )
     return started, full_url
 
 
@@ -183,9 +290,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Start PocketCodex with a Cloudflare Quick Tunnel.")
     parser.add_argument("--cloudflared", default="cloudflared", help="cloudflared executable name or path.")
     parser.add_argument("--env", default=str(DEFAULT_ENV), help="Path to remote.env.")
+    parser.add_argument("--watch-env", default=str(DEFAULT_WATCH_ENV), help="Path to optional watch.env ntfy settings.")
     parser.add_argument("--runtime-dir", default=str(default_runtime_dir()), help="Directory for local logs and URL file.")
     parser.add_argument("--startup-timeout", type=float, default=45, help="Seconds to wait for PocketCodex.")
     parser.add_argument("--tunnel-timeout", type=float, default=60, help="Seconds to wait for the Quick Tunnel URL.")
+    parser.add_argument("--notify-timeout", type=float, default=15, help="Seconds allowed for the optional ntfy publish.")
     args = parser.parse_args()
 
     processes: list[subprocess.Popen[str]] = []
