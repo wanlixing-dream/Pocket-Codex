@@ -119,6 +119,33 @@ def write_launch_agent(target: Path, payload: dict[str, Any]) -> None:
         temporary.unlink(missing_ok=True)
 
 
+def managed_job_loaded(
+    label: str,
+    *,
+    runner: Callable[..., Any] = subprocess.run,
+    uid: int | None = None,
+) -> bool:
+    domain = f"gui/{os.getuid() if uid is None else uid}"
+    result = runner(
+        ["launchctl", "print", f"{domain}/{label}"],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    return result.returncode == 0
+
+
+def ensure_safe_server_transition() -> None:
+    if not server_ready():
+        return
+    if managed_job_loaded(LAUNCH_AGENT_LABEL) or managed_job_loaded(LEGACY_LAUNCH_LABEL):
+        return
+    raise RuntimeError(
+        "Port 8765 is already served by a manually started PocketCodex process. "
+        "Stop that process before running setup."
+    )
+
+
 def install_launch_agent(
     python: Path,
     server: Path,
@@ -138,11 +165,41 @@ def install_launch_agent(
         **quiet,
     )
     runner(["launchctl", "remove", LEGACY_LAUNCH_LABEL], check=False, **quiet)
-    runner(["launchctl", "bootstrap", domain, str(target)], check=True)
-    runner(
-        ["launchctl", "kickstart", "-k", f"{domain}/{LAUNCH_AGENT_LABEL}"],
-        check=True,
-    )
+    try:
+        runner(["launchctl", "bootstrap", domain, str(target)], check=True)
+        runner(
+            ["launchctl", "kickstart", "-k", f"{domain}/{LAUNCH_AGENT_LABEL}"],
+            check=True,
+        )
+    except Exception:
+        recovery_commands = [
+            (
+                ["launchctl", "bootout", f"{domain}/{LAUNCH_AGENT_LABEL}"],
+                {"check": False, **quiet},
+            ),
+            (
+                [
+                    "launchctl",
+                    "submit",
+                    "-l",
+                    LEGACY_LAUNCH_LABEL,
+                    "-o",
+                    str(runtime_dir / "server.log"),
+                    "-e",
+                    str(runtime_dir / "server-error.log"),
+                    "--",
+                    str(python),
+                    str(server),
+                ],
+                {"check": False},
+            ),
+        ]
+        for command, options in recovery_commands:
+            try:
+                runner(command, **options)
+            except Exception:
+                pass
+        raise
 
 
 def uninstall_launch_agent(
@@ -235,6 +292,7 @@ def notify_stable_url(
 def configure_stable_access(args: argparse.Namespace) -> SetupResult:
     tailscale = args.tailscale or find_tailscale()
     base_url = stable_base_url(load_tailscale_status(tailscale))
+    ensure_safe_server_transition()
     run_tailscale(tailscale, "serve", "--bg", "--yes", LOCAL_URL)
     base_url = stable_base_url(load_tailscale_status(tailscale))
     install_launch_agent(

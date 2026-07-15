@@ -113,6 +113,80 @@ class LaunchAgentTests(unittest.TestCase):
             commands,
         )
 
+    def test_install_launch_agent_restores_fallback_when_bootstrap_fails(self):
+        with tempfile.TemporaryDirectory() as temp:
+            target = Path(temp) / "com.pocketcodex.server.plist"
+            runtime = Path(temp) / "runtime"
+            calls = []
+
+            def runner(command, **kwargs):
+                calls.append((command, kwargs))
+                if command[:2] == ["launchctl", "bootstrap"]:
+                    raise setup.subprocess.CalledProcessError(5, command)
+                return None
+
+            with self.assertRaises(setup.subprocess.CalledProcessError):
+                setup.install_launch_agent(
+                    Path("/usr/bin/python3"),
+                    Path("/repo/remote_codex_server.py"),
+                    runtime,
+                    target,
+                    runner=runner,
+                    uid=501,
+                )
+
+        commands = [call[0] for call in calls]
+        self.assertIn(
+            [
+                "launchctl",
+                "submit",
+                "-l",
+                setup.LEGACY_LAUNCH_LABEL,
+                "-o",
+                str(runtime / "server.log"),
+                "-e",
+                str(runtime / "server-error.log"),
+                "--",
+                "/usr/bin/python3",
+                "/repo/remote_codex_server.py",
+            ],
+            commands,
+        )
+
+    def test_install_launch_agent_preserves_bootstrap_error_when_cleanup_fails(self):
+        with tempfile.TemporaryDirectory() as temp:
+            target = Path(temp) / "com.pocketcodex.server.plist"
+            runtime = Path(temp) / "runtime"
+            calls = []
+            bootstrap_error = setup.subprocess.CalledProcessError(5, ["launchctl", "bootstrap"])
+            bootstrap_failed = False
+
+            def runner(command, **kwargs):
+                nonlocal bootstrap_failed
+                calls.append((command, kwargs))
+                if command[:2] == ["launchctl", "bootstrap"]:
+                    bootstrap_failed = True
+                    raise bootstrap_error
+                if bootstrap_failed and command[:2] == ["launchctl", "bootout"]:
+                    raise OSError("cleanup failed")
+                return None
+
+            with self.assertRaises(setup.subprocess.CalledProcessError) as caught:
+                setup.install_launch_agent(
+                    Path("/usr/bin/python3"),
+                    Path("/repo/remote_codex_server.py"),
+                    runtime,
+                    target,
+                    runner=runner,
+                    uid=501,
+                )
+
+        self.assertIs(caught.exception, bootstrap_error)
+        self.assertTrue(
+            any(call[0][:2] == ["launchctl", "submit"] for call in calls),
+            "fallback service was not attempted after cleanup failed",
+        )
+
     def test_uninstall_launch_agent_boots_out_job_and_removes_plist(self):
         with tempfile.TemporaryDirectory() as temp:
             target = Path(temp) / "com.pocketcodex.server.plist"
@@ -174,10 +248,19 @@ class SetupFlowTests(unittest.TestCase):
             "private-token-value",
         )
 
+    def test_preflight_rejects_unmanaged_server_on_local_port(self):
+        with patch.object(setup, "server_ready", return_value=True), patch.object(
+            setup, "managed_job_loaded", return_value=False
+        ):
+            with self.assertRaisesRegex(RuntimeError, "manually started"):
+                setup.ensure_safe_server_transition()
+
     def test_configure_stable_access_runs_full_verified_flow(self):
         with patch.object(setup, "load_tailscale_status", return_value=self.status), patch.object(
             setup, "run_tailscale"
         ) as run, patch.object(setup, "install_launch_agent") as install, patch.object(
+            setup, "ensure_safe_server_transition"
+        ), patch.object(
             setup, "wait_for_local_server"
         ) as wait_local, patch.object(
             setup, "wait_for_token", return_value="private-token-value"
@@ -220,6 +303,8 @@ class SetupFlowTests(unittest.TestCase):
         with patch.object(setup, "load_tailscale_status", return_value=self.status), patch.object(
             setup, "run_tailscale"
         ), patch.object(setup, "install_launch_agent"), patch.object(
+            setup, "ensure_safe_server_transition"
+        ), patch.object(
             setup, "wait_for_local_server"
         ), patch.object(setup, "wait_for_token", return_value="private-token-value"), patch.object(
             setup, "wait_for_stable_url"

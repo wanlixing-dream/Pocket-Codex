@@ -124,7 +124,7 @@ http://127.0.0.1:8765
 
 1. 在电脑和手机安装 [Tailscale](https://tailscale.com/download)，并登录同一账号。
 2. 确认手机和电脑都在 Tailscale 设备列表中显示在线。
-3. macOS 在项目目录运行：
+3. macOS 用户克隆仓库后可以直接在项目目录运行以下脚本，不必先手动启动 `remote_codex_server.py`。如果已经在终端手动启动，请先按 `Ctrl+C` 停止它：
 
 ```bash
 python3 setup_tailscale_serve.py
@@ -132,9 +132,11 @@ python3 setup_tailscale_serve.py
 
 首次使用时，Tailscale 可能打开浏览器要求授权 Serve。脚本随后会：
 
+- 检查 `8765` 端口是否由 PocketCodex 的受管后台任务占用；发现手动进程时会拒绝迁移，避免后台任务反复启动失败；
 - 把 `http://127.0.0.1:8765` 配置为后台 Tailscale Serve；
 - 安装用户级 `com.pocketcodex.server` LaunchAgent；
 - 在 Mac 登录后自动启动 PocketCodex，异常退出时自动恢复；
+- 如果新 LaunchAgent 启动失败，尝试恢复旧的临时后台服务并保留原始错误；
 - 验证固定首页和带令牌的 sessions API；
 - 配置 ntfy 时，只发送一次经过验证的固定入口。
 
