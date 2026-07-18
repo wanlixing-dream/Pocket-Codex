@@ -15,8 +15,8 @@ flowchart TB
     end
 
     subgraph Network[远程访问层]
-        Cloudflare[Cloudflare Quick Tunnel<br/>国内用户默认入口]
-        Tailscale[Tailscale Serve<br/>私有网络备选]
+        Tailscale[Tailscale Serve<br/>推荐固定入口]
+        Cloudflare[Cloudflare Quick Tunnel<br/>临时测试入口]
     end
 
     subgraph Desktop[桌面电脑]
@@ -157,7 +157,7 @@ sequenceDiagram
 
 ### Cloudflare Quick Tunnel
 
-面向国内用户的默认上手路径：
+不安装 Tailscale 时的临时回退路径：
 
 - cloudflared 从本机主动建立到 Cloudflare 的出站连接。
 - 手机不需要安装 Tailscale，但必须能够访问生成的 `trycloudflare.com` 地址。
@@ -168,12 +168,15 @@ sequenceDiagram
 
 ### Tailscale Serve
 
-无法或不便使用 Tailscale 的用户不需要安装它。已经具备 Tailscale 条件、并希望获得固定私有入口时，可以选择该方案：
+长期运行推荐使用该方案：
 
 - PocketCodex 仍只监听 loopback。
 - Tailscale 在 tailnet 内提供 HTTPS 入口。
 - tailnet 身份和 ACL 构成令牌以外的第二层访问控制。
 - 手机和电脑都需要加入同一 tailnet。
+- Windows 启动器会验证固定首页和带令牌 API 后才停止旧 Quick Tunnel。
+- Tailscale Windows 服务维护 Serve 配置；`RemoteCodexWatchdog` 每 5 分钟维护 PocketCodex 进程。
+- macOS 使用 LaunchAgent，Windows 使用任务计划程序，两者是平台对应关系，不会同时使用。
 
 ## 5. 安全边界
 
@@ -201,7 +204,7 @@ sequenceDiagram
 ### 部署原则
 
 1. 保持服务绑定 loopback。
-2. 使用默认 Quick Tunnel 时，把令牌和完整 URL 当作密码；不用时停止隧道。
+2. 优先使用 Tailscale Serve；使用 Quick Tunnel 时，把令牌和完整 URL 当作密码并在不用时停止隧道。
 3. 把 `remote.env` 当作密码文件处理。
 4. 只开放必要项目根目录。
 5. 令牌疑似泄漏时立即轮换。

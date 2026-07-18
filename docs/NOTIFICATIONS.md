@@ -89,9 +89,9 @@ python .\watch_approve.py --print-codex-config
 
 - `remote_codex_server.py` 负责远程 session 控制。
 - `watch_done.py` 和 `watch_approve.py` 由 Codex/Claude Code hook 调用。
-- `start_remote_codex.ps1` 可在特定 Windows 环境中启动 Quick Tunnel，并通过现有 ntfy 配置发送新 URL。
-- 新 URL 通知标题为 `Codex Remote - NEW LINK`，正文直接显示完整地址，同时提供 `OPEN CODEX` 按钮。
-- `start_remote_codex.ps1 -InstallWatchdog` 每 5 分钟检查临时通道；Cloudflare 回收通道后会自动重建并只在地址变化时再次通知。
+- `start_remote_codex.ps1 -InstallWatchdog -AccessMode Tailscale` 会验证固定入口，并通过现有 ntfy 配置只发送一次 `Codex Remote - FIXED LINK`。
+- `start_remote_codex.ps1 -InstallWatchdog -AccessMode Cloudflare` 每 5 分钟检查临时通道；Cloudflare 回收通道后会自动重建并发送 `Codex Remote - NEW LINK`。
+- 两种通知都提供 `OPEN CODEX` 按钮；完整 tokenized URL 只应发送到自己的私有 topic。
 - 停用远程访问前运行 `start_remote_codex.ps1 -RemoveWatchdog`，否则计划任务可能重新启动通道。
 - 不配置通知脚本时，PocketCodex 的 session 列表、新建、继续、图片上传和停止功能仍可使用。
 

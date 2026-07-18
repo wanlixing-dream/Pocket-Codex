@@ -34,8 +34,8 @@ Codex, its sessions, and your project files remain on your desktop. The phone is
 ```mermaid
 flowchart LR
     Phone[Phone browser] -->|HTTPS| Access{Access layer}
-    Access -->|Default for mainland China| CF[Cloudflare Quick Tunnel]
-    Access -->|Private-network alternative| TS[Tailscale Serve]
+    Access -->|Recommended stable access| TS[Tailscale Serve]
+    Access -->|Temporary fallback| CF[Cloudflare Quick Tunnel]
     TS --> Server[PocketCodex server<br/>127.0.0.1:8765]
     CF --> Server
     Server --> Sessions[Read ~/.codex/sessions]
@@ -57,14 +57,14 @@ See [Architecture](./docs/ARCHITECTURE.md) for component boundaries, request flo
 - Python 3.10 or newer.
 - [Codex CLI](https://developers.openai.com/codex/cli) installed, available on `PATH`, and signed in.
 - One remote access option:
-  - Default setup: [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)
-  - Private-network alternative: [Tailscale](https://tailscale.com/download)
+  - Recommended stable access: [Tailscale](https://tailscale.com/download)
+  - Temporary fallback: [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)
 
 ### Phone
 
 - Safari, Chrome, or another modern browser.
-- The phone must be able to reach the generated `trycloudflare.com` URL. Some mainland-China iPhone users use an already-installed proxy client such as Shadowrocket; PocketCodex does not provide a proxy service.
-- Tailscale installed and signed in to the same tailnet only when using the alternative setup.
+- Tailscale installed, connected, and signed in to the same tailnet when using the recommended setup.
+- The phone must be able to reach `trycloudflare.com` only when using the temporary Cloudflare fallback.
 
 The Python server uses only the standard library. There is no `pip install` step.
 
@@ -92,60 +92,42 @@ The server listens only on `http://127.0.0.1:8765` by default. On first start it
 > [!WARNING]
 > Never commit, screenshot, or publicly share `remote.env`. Anyone with its token may be able to send instructions to your local Codex sessions.
 
-### 3. Connect with Cloudflare Quick Tunnel (default)
+### 3. Connect with Tailscale Serve (recommended)
 
-Install `cloudflared`, keep PocketCodex running, and start a second PowerShell:
-
-```powershell
-cloudflared tunnel --url http://127.0.0.1:8765
-```
-
-Open the generated URL on the phone and append the token once:
-
-```text
-https://random-name.trycloudflare.com/#token=YOUR_REMOTE_CODEX_TOKEN
-```
-
-The web client stores the token in that browser and removes the fragment from the address bar. Quick Tunnel URLs are public and normally change after cloudflared restarts, so never share the complete URL in chats, issues, or screenshots.
-
-#### Windows startup, tunnel recovery, and ntfy link updates
-
-`start_remote_codex.ps1` is a Windows helper that starts the local server and Quick Tunnel. If Cloudflare has reclaimed the temporary tunnel, the script replaces it. When `NTFY_NOTIFY_TOPIC` is configured in `watch.env`, an address change sends a `Codex Remote - NEW LINK` ntfy notification containing the full URL and an `OPEN CODEX` button.
-
-After installing `cloudflared` and configuring ntfy as described in [Notifications and approvals](./docs/NOTIFICATIONS.md), run:
+Install Tailscale on Windows and the phone, sign both into the same tailnet, then run:
 
 ```powershell
-.\start_remote_codex.ps1
+.\start_remote_codex.ps1 -InstallWatchdog -AccessMode Tailscale
 ```
 
-Cloudflare may reclaim a Quick Tunnel while its process is still alive. For continuous use, install the current-user watchdog that runs every five minutes, also on battery power, and only notifies when the URL changes:
+The launcher starts PocketCodex, configures Serve, validates the fixed page and authenticated sessions API, and installs the five-minute current-user `RemoteCodexWatchdog`. After validation it stops the old Cloudflare Quick Tunnel. With ntfy configured, it sends one `Codex Remote - FIXED LINK` notification.
 
-```powershell
-.\start_remote_codex.ps1 -InstallWatchdog
-```
-
-To disable remote access, remove the watchdog before stopping cloudflared and PocketCodex so it cannot restart them:
-
-```powershell
-.\start_remote_codex.ps1 -RemoveWatchdog
-```
-
-### 4. Tailscale Serve (private-network alternative)
-
-Tailscale adds device identity and tailnet ACLs. Use it when it is available and you prefer a stable private address:
-
-```powershell
-tailscale serve --bg http://127.0.0.1:8765
-tailscale serve status
-```
-
-Open the reported HTTPS URL and append the token on first use:
+The private URL has this stable form:
 
 ```text
 https://your-device.your-tailnet.ts.net/#token=YOUR_REMOTE_CODEX_TOKEN
 ```
 
-Stop sharing with `tailscale serve reset`.
+The complete link is also stored in `%LOCALAPPDATA%\RemoteCodex\remote-url.txt` with a current-user-only ACL. Check the non-secret service state with `.\start_remote_codex.ps1 -Status`.
+
+`RemoteCodexWatchdog` is the Windows Task Scheduler equivalent of the macOS LaunchAgent. Windows cannot run `launchctl` or LaunchAgent plist files; Tailscale's Windows service keeps Serve configured while the scheduled task restores PocketCodex when needed.
+
+To disable automatic recovery, remove the watchdog before resetting Serve:
+
+```powershell
+.\start_remote_codex.ps1 -RemoveWatchdog
+tailscale serve reset
+```
+
+### 4. Cloudflare Quick Tunnel (temporary fallback)
+
+Install `cloudflared` and run `.\start_remote_codex.ps1 -AccessMode Cloudflare`. For five-minute tunnel recovery, use:
+
+```powershell
+.\start_remote_codex.ps1 -InstallWatchdog -AccessMode Cloudflare
+```
+
+Quick Tunnel URLs are public and normally change after cloudflared restarts. Treat the full tokenized URL as a password.
 
 ### 5. Use the mobile client
 
@@ -222,7 +204,7 @@ PocketCodex can start Codex on your machine and should be treated as a remote ad
 - Runs time out after six hours and retain the final 30,000 output characters in memory.
 - A folder level shows at most 250 non-hidden subdirectories.
 - Run state is in memory and is lost when the service restarts.
-- `start_remote_codex.ps1` is a Windows + cloudflared + ntfy helper that can install or remove `RemoteCodexWatchdog`; use the manual commands above for a portable installation.
+- `RemoteCodexWatchdog` checks every five minutes rather than restarting a failed process immediately like a macOS LaunchAgent with `KeepAlive`.
 
 ## Project layout
 
@@ -230,7 +212,7 @@ PocketCodex can start Codex on your machine and should be treated as a remote ad
 Pocket-Codex/
 ├── remote_codex_server.py   # API, authentication, session parsing, process management
 ├── remote_web/              # Mobile HTML/CSS/JavaScript client
-├── start_remote_codex.ps1   # Windows Quick Tunnel helper
+├── start_remote_codex.ps1   # Windows Tailscale/Cloudflare launcher and watchdog
 ├── watch_approve.py         # Optional approval hook
 ├── watch_done.py            # Optional completion/failure hook
 ├── examples/                # Codex and Claude Code hook examples

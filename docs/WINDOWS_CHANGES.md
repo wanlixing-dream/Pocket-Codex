@@ -1,6 +1,6 @@
 # Windows 分支修改清单
 
-更新日期：2026-07-15
+更新日期：2026-07-18
 分支：`windows`
 起点：`5e0d9cc`
 
@@ -41,13 +41,17 @@
 
 ## 五、Windows 远程连接
 
-- 新增 `start_remote_codex.ps1`，用于后台启动 PocketCodex 和 Cloudflare Quick Tunnel。
+- `start_remote_codex.ps1` 支持持久化选择 `Tailscale` 或 `Cloudflare` 访问模式。
+- Tailscale 模式自动检查登录状态和 MagicDNS，配置固定 Serve，并验证首页与带 token 的 sessions API。
+- 固定入口验证成功后才停止旧 Cloudflare 通道；验证失败时保留当前临时入口。
+- 固定 tokenized URL、通知去重记录、服务日志及本地 env 配置使用仅当前 Windows 用户可访问的 ACL。
+- `RemoteCodexWatchdog` 使用 Windows 任务计划程序维护 PocketCodex；它对应 macOS LaunchAgent，但每 5 分钟巡检而不是依赖 `launchd KeepAlive`。
 - 检测 Cloudflare `Tunnel not found` 后自动重建临时通道。
 - 地址变化时读取现有 `watch.env`，向 `NTFY_NOTIFY_TOPIC` 发送 `Codex Remote - NEW LINK`。
 - 新链接通知正文直接显示完整地址，同时提供 `OPEN CODEX` 按钮和整条通知点击跳转。
 - 新增 `-InstallWatchdog`，安装每 5 分钟运行一次、允许使用电池的当前用户计划任务 `RemoteCodexWatchdog`。
 - 新增 `-RemoveWatchdog`，用于停用远程访问前删除巡检任务，防止通道被自动重新启动。
-- 保留 Tailscale Serve 作为能够在手机和电脑安装 Tailscale 时的私有网络备选方案。
+- Tailscale Serve 作为长期固定私有入口，Cloudflare Quick Tunnel 保留为临时回退。
 
 ## 六、ntfy 与手表通知
 
@@ -68,11 +72,12 @@
 
 ## 八、验证结果
 
-- `python -m unittest discover -s tests -v`：74 项测试通过。
+- `python -m unittest discover -s tests -v`：80 项测试通过。
 - `python -m py_compile remote_codex_server.py watch_approve.py watch_done.py`：通过。
 - `node --check remote_web/app.js`：通过。
 - PowerShell 语法解析：通过。
 - `start_remote_codex.ps1 -InstallWatchdog`：在 Windows 上实际安装成功，计划任务允许使用电池。
+- Windows Tailscale 固定入口、认证 API、计划任务模式和旧 Cloudflare 停止流程完成真实链路验证。
 - 图片上传、session 续接、新建 session、停止任务、Cloudflare 通道重建和 ntfy 新链接均完成过真实链路验证。
 
 ## 九、已知限制
